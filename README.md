@@ -103,17 +103,17 @@ orientations. Results for the scene model on its own (with faces, body pose and 
 | Review minimum confidence | Rotated landscapes found | Turned the wrong way | Upright landscapes wrongly flagged |
 | --- | --- | --- | --- |
 | 50% | 79% | 1.2% | 1.8% |
-| 60% (default) | ~76% | ~0.9% | ~1.3% |
+| 60% (default) | 75% | 0.8% | 1.3% |
 | 70% | 73% | 0.6% | 0.8% |
 | 80% | 71% | 0.4% | 0.6% |
 
-Across all kinds of photo (not just landscapes), the scene model finds 59% of rotated photos at 50% and 47% at 80%,
-and wrongly flags 2.2% and 0.7% of upright ones. Close-ups, textures, food shot from above and other photos with no
-clear "up" are where it's unsure, and those stay **Not enough to judge**. The 60% row is interpolated between the
-measured 50% and 70% rows.
+Across all kinds of photo (not just landscapes), at the default 60% the scene model finds 54% of rotated photos,
+turns 1.1% the wrong way, and wrongly flags 1.6% of upright ones. Close-ups, textures, food shot from above and other
+photos with no clear "up" are where it's unsure, and those stay **Not enough to judge**. The full tables for every
+threshold are in `SceneModelWeights.summary`.
 
-What these numbers mean for a big library: if 150,000 of your photos have no faces, roughly 1,000–2,000 upright ones
-will be flagged at the default setting. They're never changed unless you tick them. Raise **Minimum confidence** on
+What these numbers mean for a big library: if 150,000 of your photos have no faces, roughly 2,000 upright ones
+will be flagged at the default setting (about 1,000 at 80%). They're never changed unless you tick them. Raise **Minimum confidence** on
 the review screen to see fewer false alarms (and find fewer rotated photos). The test photos come from Unsplash, so
 they're more polished than typical phone photos; your library may score differently.
 
