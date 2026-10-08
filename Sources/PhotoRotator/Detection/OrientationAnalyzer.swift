@@ -64,11 +64,11 @@ struct OrientationAnalyzer: Sendable {
             let size = pass.swapsDimensions
                 ? CGSize(width: image.height, height: image.width)
                 : CGSize(width: image.width, height: image.height)
-            let requests = active.map { detectors[$0].makeRequest() }
+            let requests = active.map { detectors[$0].makeRequests() }
             let handler = VNImageRequestHandler(cgImage: image, orientation: pass.cgOrientation, options: [:])
-            try handler.perform(requests)
-            for (request, i) in zip(requests, active) {
-                scores[i].merge(detectors[i].uprightScores(of: request, image: image, frameSize: size, pass: pass)) { $0 + $1 }
+            try handler.perform(requests.flatMap { $0 })
+            for (detectorRequests, i) in zip(requests, active) {
+                scores[i].merge(detectors[i].uprightScores(of: detectorRequests, image: image, frameSize: size, pass: pass)) { $0 + $1 }
             }
         }
         return detectors.enumerated().map { i, d in

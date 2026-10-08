@@ -1,6 +1,7 @@
 name: Train scene model
 
 # Trains the built-in scene orientation model on Unsplash Lite photos and commits the weights to the branch.
+# Feature extraction is split across parallel runners and cached, so retraining after a model change is quick.
 on:
   push:
     branches: ['claude/**']
@@ -22,28 +23,25 @@ concurrency:
 
 env:
   PHOTO_COUNT: 12000
+  SHARDS: 5
 
 jobs:
-  train:
+  photos:
     runs-on: macos-15
-    timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
-
-      - name: Restore training photos
+      - name: Check for cached training photos
         id: photos
         uses: actions/cache/restore@v4
         with:
           path: training-data
           key: unsplash-lite-${{ env.PHOTO_COUNT }}-${{ hashFiles('Tools/TrainOrientationModel/prepare_unsplash.py') }}
-
+          lookup-only: true
       - name: Download training photos
         if: steps.photos.outputs.cache-hit != 'true'
         run: |
           curl -fsSL -o "$RUNNER_TEMP/unsplash-lite.zip" https://unsplash.com/data/lite/latest
-          ls -lh "$RUNNER_TEMP/unsplash-lite.zip"
           python3 Tools/TrainOrientationModel/prepare_unsplash.py "$RUNNER_TEMP/unsplash-lite.zip" training-data "$PHOTO_COUNT"
-
       - name: Save training photos
         if: steps.photos.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -51,36 +49,83 @@ jobs:
           path: training-data
           key: unsplash-lite-${{ env.PHOTO_COUNT }}-${{ hashFiles('Tools/TrainOrientationModel/prepare_unsplash.py') }}
 
-      - name: Restore extracted features
+  extract:
+    needs: photos
+    runs-on: macos-15
+    timeout-minutes: 300
+    strategy:
+      matrix:
+        shard: [0, 1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache/restore@v4
+        with:
+          path: training-data
+          key: unsplash-lite-${{ env.PHOTO_COUNT }}-${{ hashFiles('Tools/TrainOrientationModel/prepare_unsplash.py') }}
+          fail-on-cache-miss: true
+      - name: Restore this shard's features
         uses: actions/cache/restore@v4
         with:
-          path: training-cache
-          key: features-${{ hashFiles('Sources/RotatorVision/SceneFeatures.swift') }}-${{ env.PHOTO_COUNT }}-${{ github.run_id }}
-          # The second key matches feature caches saved before the key covered only SceneFeatures.swift; the
-          # extraction code is unchanged since then.
-          restore-keys: |
-            features-${{ hashFiles('Sources/RotatorVision/SceneFeatures.swift') }}-${{ env.PHOTO_COUNT }}-
-            features-1d0a98e73cee09099269a242ad73afbd2721f032ec9a9c61f274e5319a8f5982-${{ env.PHOTO_COUNT }}-
-
-      - name: Build trainer
-        run: swift build -c release --product train-orientation-model
-
-      - name: Extract features, train and evaluate
+          path: training-cache/shard-${{ matrix.shard }}.bin
+          key: region-features-${{ hashFiles('Sources/RotatorVision/SceneFeatures.swift') }}-${{ env.PHOTO_COUNT }}-shard${{ matrix.shard }}-${{ github.run_id }}
+          restore-keys: region-features-${{ hashFiles('Sources/RotatorVision/SceneFeatures.swift') }}-${{ env.PHOTO_COUNT }}-shard${{ matrix.shard }}-
+      - run: swift build -c release --product train-orientation-model
+      - name: Extract features
         run: |
           mkdir -p training-cache
-          .build/release/train-orientation-model \
-            --images training-data/images \
-            --landscapes training-data/landscapes.txt \
-            --cache training-cache/features.bin \
-            --output Sources/PhotoRotator/Detection/SceneModelWeights.swift
-
-      - name: Save extracted features
+          .build/release/train-orientation-model --images training-data/images \
+            --cache training-cache/shard-${{ matrix.shard }}.bin \
+            --shard ${{ matrix.shard }}/$SHARDS --extract-only yes
+      - name: Save this shard's features
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: training-cache
-          key: features-${{ hashFiles('Sources/RotatorVision/SceneFeatures.swift') }}-${{ env.PHOTO_COUNT }}-${{ github.run_id }}
+          path: training-cache/shard-${{ matrix.shard }}.bin
+          key: region-features-${{ hashFiles('Sources/RotatorVision/SceneFeatures.swift') }}-${{ env.PHOTO_COUNT }}-shard${{ matrix.shard }}-${{ github.run_id }}
 
+  train:
+    needs: extract
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache/restore@v4
+        with:
+          path: training-data
+          key: unsplash-lite-${{ env.PHOTO_COUNT }}-${{ hashFiles('Tools/TrainOrientationModel/prepare_unsplash.py') }}
+          fail-on-cache-miss: true
+      - uses: actions/cache/restore@v4
+        with:
+          path: training-cache/shard-0.bin
+          key: region-features-${{ hashFiles('Sources/RotatorVision/SceneFeatures.swift') }}-${{ env.PHOTO_COUNT }}-shard0-${{ github.run_id }}
+          fail-on-cache-miss: true
+      - uses: actions/cache/restore@v4
+        with:
+          path: training-cache/shard-1.bin
+          key: region-features-${{ hashFiles('Sources/RotatorVision/SceneFeatures.swift') }}-${{ env.PHOTO_COUNT }}-shard1-${{ github.run_id }}
+          fail-on-cache-miss: true
+      - uses: actions/cache/restore@v4
+        with:
+          path: training-cache/shard-2.bin
+          key: region-features-${{ hashFiles('Sources/RotatorVision/SceneFeatures.swift') }}-${{ env.PHOTO_COUNT }}-shard2-${{ github.run_id }}
+          fail-on-cache-miss: true
+      - uses: actions/cache/restore@v4
+        with:
+          path: training-cache/shard-3.bin
+          key: region-features-${{ hashFiles('Sources/RotatorVision/SceneFeatures.swift') }}-${{ env.PHOTO_COUNT }}-shard3-${{ github.run_id }}
+          fail-on-cache-miss: true
+      - uses: actions/cache/restore@v4
+        with:
+          path: training-cache/shard-4.bin
+          key: region-features-${{ hashFiles('Sources/RotatorVision/SceneFeatures.swift') }}-${{ env.PHOTO_COUNT }}-shard4-${{ github.run_id }}
+          fail-on-cache-miss: true
+      - run: swift build -c release --product train-orientation-model
+      - name: Train and evaluate
+        run: |
+          .build/release/train-orientation-model --images training-data/images \
+            --landscapes training-data/landscapes.txt \
+            --cache training-cache/shard-0.bin,training-cache/shard-1.bin,training-cache/shard-2.bin,training-cache/shard-3.bin,training-cache/shard-4.bin \
+            --output Sources/PhotoRotator/Detection/SceneModelWeights.swift
       - name: Commit trained weights
         run: |
           git config user.name "github-actions[bot]"
@@ -88,4 +133,5 @@ jobs:
           git add Sources/PhotoRotator/Detection/SceneModelWeights.swift
           if git diff --cached --quiet; then echo "Weights unchanged"; exit 0; fi
           git commit -m "Update built-in scene orientation model"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
           git push origin "HEAD:${GITHUB_REF_NAME}"

@@ -16,16 +16,30 @@ protocol OrientationDetector: Sendable {
     /// the photo as displayed, and score every correction from that single result. Other detectors are shown the
     /// photo once per candidate correction.
     var runsOnce: Bool { get }
-    func makeRequest() -> VNRequest
+    func makeRequests() -> [VNRequest]
     /// Scores keyed by correction. `pass` is the correction Vision applied before analysing, `image` is the photo
     /// as displayed (before that correction), and `frameSize` is the pixel size of the frame Vision analysed.
+    func uprightScores(of requests: [VNRequest], image: CGImage, frameSize: CGSize, pass: Rotation) -> [Rotation: Double]
+}
+
+/// Most detectors need a single Vision request per pass.
+protocol SingleRequestDetector: OrientationDetector {
+    func makeRequest() -> VNRequest
     func uprightScores(of request: VNRequest, image: CGImage, frameSize: CGSize, pass: Rotation) -> [Rotation: Double]
+}
+
+extension SingleRequestDetector {
+    func makeRequests() -> [VNRequest] { [makeRequest()] }
+
+    func uprightScores(of requests: [VNRequest], image: CGImage, frameSize: CGSize, pass: Rotation) -> [Rotation: Double] {
+        requests.first.map { uprightScores(of: $0, image: image, frameSize: frameSize, pass: pass) } ?? [:]
+    }
 }
 
 /// A detector that only recognises upright content. It is run on all four orientations, and the orientation in
 /// which it finds upright content gets the credit. Because every score is about the frame Vision analysed, the
 /// detector never needs to know which way a rotation's sign runs.
-protocol PerPassDetector: OrientationDetector {
+protocol PerPassDetector: SingleRequestDetector {
     func uprightScore(of request: VNRequest, frameSize: CGSize) -> Double
 }
 
@@ -39,7 +53,7 @@ extension PerPassDetector {
 
 /// Faces are the strongest cue. Vision's face detector finds faces at any in-plane angle and reports their roll,
 /// so one pass is enough: a face rolled by about +90° means the photo needs 90° clockwise, and so on.
-struct FaceDetector: OrientationDetector {
+struct FaceDetector: SingleRequestDetector {
     let name = "faces"
     let weight = 1.0
     let runsOnce = true
@@ -206,8 +220,9 @@ struct CoreMLDetector: PerPassDetector, @unchecked Sendable {
 }
 
 /// Landscapes, buildings, objects — anything. A small classifier, trained on thousands of photos turned all four
-/// ways, reads Vision's feature print (what the photo shows) together with a coarse colour-and-edge map (where things
-/// are: sky above ground, horizons, buildings and trees pointing up) and estimates which correction the photo needs.
+/// ways, reads Vision's feature prints of the whole photo and of its top and bottom halves (what is where) together
+/// with a coarse colour-and-edge map (sky above ground, horizons, buildings and trees pointing up) and estimates
+/// which correction the photo needs.
 /// It runs on all four orientations and the four estimates are averaged, which cancels out direction biases.
 struct SceneDetector: OrientationDetector {
     let name = "scene"
@@ -222,10 +237,10 @@ struct SceneDetector: OrientationDetector {
         .flatMap { try? OrientationClassifier(data: $0) }
         .flatMap { $0.inputSize == inputSize ? $0 : nil }
 
-    func makeRequest() -> VNRequest { SceneFeatures.makeRequest() }
+    func makeRequests() -> [VNRequest] { SceneFeatures.makeRequests() }
 
-    func uprightScores(of request: VNRequest, image: CGImage, frameSize: CGSize, pass: Rotation) -> [Rotation: Double] {
-        guard let featurePrint = SceneFeatures.vector(from: request), let grid = SceneGrid.rgb(of: image) else { return [:] }
+    func uprightScores(of requests: [VNRequest], image: CGImage, frameSize: CGSize, pass: Rotation) -> [Rotation: Double] {
+        guard let featurePrint = SceneFeatures.vector(from: requests), let grid = SceneGrid.rgb(of: image) else { return [:] }
         let input = featurePrint + GridFeatures.features(grid, rotatedBy: pass)
         return OrientationClassifier.passScores(classifier.probabilities(input), pass: pass)
     }

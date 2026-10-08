@@ -1,7 +1,11 @@
 // Trains the built-in scene orientation model.
 //
-//   train-orientation-model --images DIR --cache FILE --output FILE [--landscapes FILE]
+//   train-orientation-model --images DIR --cache FILE[,FILE…] --output FILE [--landscapes FILE]
 //                           [--hidden N --decay X] [--epochs 30]
+//   train-orientation-model --images DIR --cache FILE --shard I/N --extract-only yes
+//
+// Feature extraction is slow on CI machines, so it can be split into N shards run in parallel, each writing its own
+// cache file; the training run then reads all of them. New features are appended to the first cache file.
 //
 // Every photo in DIR is assumed to be upright. Each one is shown to Vision turned all four ways, so the labels come
 // for free. Photos are split by name into training (75%), validation (10%) and test (15%) sets; the test photos are
@@ -23,10 +27,17 @@ while let key = argumentIterator.next() {
     }
     options[String(key.dropFirst(2))] = value
 }
-guard let imagesDir = options["images"], let cachePath = options["cache"], let outputPath = options["output"] else {
-    print("usage: train-orientation-model --images DIR --cache FILE --output FILE [--landscapes FILE] [--hidden N] [--epochs N]")
+let extractOnly = options["extract-only"] != nil
+guard let imagesDir = options["images"], let cacheList = options["cache"], extractOnly || options["output"] != nil else {
+    print("usage: train-orientation-model --images DIR --cache FILE[,FILE…] (--output FILE | --extract-only yes) [--shard I/N] [--landscapes FILE] [--hidden N --decay X] [--epochs N]")
     exit(2)
 }
+let cachePaths = cacheList.split(separator: ",").map(String.init)
+let cachePath = cachePaths[0]
+let shard: (index: Int, count: Int) = {
+    let parts = (options["shard"] ?? "0/1").split(separator: "/").compactMap { Int($0) }
+    return parts.count == 2 && parts[1] > 0 ? (parts[0], parts[1]) : (0, 1)
+}()
 let landscapeNames = Set((options["landscapes"].flatMap { try? String(contentsOfFile: $0, encoding: .utf8) } ?? "")
     .split(whereSeparator: \.isNewline).map(String.init))
 
@@ -38,6 +49,7 @@ func log(_ message: String) {
 // MARK: Feature cache
 // Each record: UInt16 name length, UTF-8 name, then 4 × dimension Float32 — the features of the photo turned so it
 // needs 0, 1, 2 and 3 quarter turns clockwise. A record of all zeros marks a photo that could not be used.
+// The dimension is fixed by SceneFeatures, so a change there needs a new cache file name.
 
 let dimension = SceneFeatures.dimension
 
@@ -53,7 +65,8 @@ func loadThumbnail(_ name: String) -> CGImage? {
 }
 var features: [String: [[Float]]] = [:]
 
-if let data = FileManager.default.contents(atPath: cachePath) {
+for path in cachePaths {
+    guard let data = FileManager.default.contents(atPath: path) else { continue }
     var offset = 0
     let recordFloats = 4 * dimension
     while offset + 2 <= data.count {
@@ -64,14 +77,16 @@ if let data = FileManager.default.contents(atPath: cachePath) {
         features[name] = (0..<4).map { Array(floats[($0 * dimension)..<(($0 + 1) * dimension)]) }
         offset = end
     }
-    log("Loaded cached features for \(features.count) photos")
+    log("Loaded cached features from \(path): \(features.count) photos so far")
 }
 
 let allNames = ((try? FileManager.default.contentsOfDirectory(atPath: imagesDir)) ?? [])
     .filter { $0.lowercased().hasSuffix(".jpg") }
     .sorted()
-let missing = allNames.filter { features[$0] == nil }
-log("\(allNames.count) photos, \(missing.count) need feature extraction")
+let missing = allNames.enumerated()
+    .filter { $0.offset % shard.count == shard.index && features[$0.element] == nil }
+    .map(\.element)
+log("\(allNames.count) photos; shard \(shard.index + 1) of \(shard.count) has \(missing.count) needing feature extraction")
 
 if !missing.isEmpty {
     if !FileManager.default.fileExists(atPath: cachePath) {
@@ -117,6 +132,12 @@ if !missing.isEmpty {
     }
     try cacheHandle.close()
 }
+
+if extractOnly {
+    log("Extraction finished")
+    exit(0)
+}
+let outputPath = options["output"]!
 
 // MARK: Layout grids (cheap, so recomputed every run rather than cached)
 
@@ -168,7 +189,7 @@ func samples(_ names: [String]) -> [LabeledFeatures] {
 
 // Several sizes and regularisation strengths; the one with the best validation accuracy is kept.
 let trainingSet = samples(trainNames), validationSet = samples(validationNames)
-var configurations: [(hidden: Int, decay: Float)] = [(0, 1e-3), (128, 1e-2), (256, 5e-2)]
+var configurations: [(hidden: Int, decay: Float)] = [(0, 1e-3), (128, 1e-2), (128, 5e-2)]
 if let hidden = options["hidden"].flatMap(Int.init) { configurations = [(hidden, Float(options["decay"] ?? "") ?? 1e-2)] }
 var trainer = OrientationTrainer()
 trainer.epochs = Int(options["epochs"] ?? "") ?? 30
@@ -258,7 +279,7 @@ func report(_ title: String, _ tally: Tally) -> String {
 
 let testAccuracy = model.accuracy(on: samples(testNames))
 let summary = """
-Scene orientation model: Vision feature print revision 2 + 8×8 colour and edge layout → \(trainer.hiddenSize > 0 ? "\(trainer.hiddenSize)-unit hidden layer" : "linear") (weight decay \(trainer.weightDecay)) → 4 classes.
+Scene orientation model: Vision feature prints (revision 2) of the whole photo and its top and bottom halves + 8×8 colour and edge layout → \(trainer.hiddenSize > 0 ? "\(trainer.hiddenSize)-unit hidden layer" : "linear") (weight decay \(trainer.weightDecay)) → 4 classes.
 Trained on \(trainNames.count) photos (×4 rotations); validated on \(validationNames.count); tested on \(testNames.count) held-out photos.
 Single-pass test accuracy: \(String(format: "%.1f%%", 100 * testAccuracy)).
 
