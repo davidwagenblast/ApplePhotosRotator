@@ -82,7 +82,7 @@ Each photo is checked as a small thumbnail, using macOS's Vision framework plus 
 | --- | --- | --- |
 | **Faces** | Vision finds faces at any angle and reports how far each is tilted. A face tilted about 90° means the photo needs a quarter turn; this needs only one Vision pass per photo. Faces tilted 30–45° from a quarter turn are ignored as ambiguous. | 1.0 |
 | **People (body pose)** | Checked in all four orientations. The orientation where the neck is above the hips gets the credit (for head-and-shoulders shots, the nose above the neck). | 0.8 |
-| **Scenes — landscapes, buildings, objects** | A small built-in model looks at what the photo shows (Vision's image "feature print") together with a coarse colour-and-edge map of where things are (bright sky above darker ground, horizons, upright buildings and trees). It's checked in all four orientations and the four estimates are averaged. | 0.9 |
+| **Scenes — landscapes, buildings, objects, anything** | A built-in image-recognition network (MobileNetV3), fine-tuned to tell which way a photo is turned. It's checked in all four orientations and the four estimates are averaged. If a build doesn't include the network, a lighter built-in scene model is used instead. | 1.0 |
 | **Text** | Checked in all four orientations. Vision can't read sideways text, and it reads upside-down text as gibberish, so the orientation with the most real dictionary words gets the credit. Vision's own confidence score is ignored because it's the same for gibberish and real text. | 0.7 |
 | **Core ML model** (optional) | Checked in all four orientations. The model's probability for its "upright" class. | 1.0 |
 
@@ -97,35 +97,47 @@ faces need just one Vision request.
 **Faces and text** (CI on a Mac): a real photo of a person and a page of text are each turned to all four
 orientations. Every time, the app proposes the right fix, and applying that fix makes the image upright again.
 
-**Scenes** were measured on 1,777 held-out photos the model never saw in training, each tested in all four
-orientations. Results for the scene model on its own (with faces, body pose and text turned off):
+**Scenes** were measured on 1,777 held-out Unsplash photos that the network never saw in training, each tested in
+all four orientations. The network ran as the app runs it (Core ML through Vision), with faces, body pose and text
+turned off so the numbers show the network alone:
 
 | Review minimum confidence | Rotated landscapes found | Turned the wrong way | Upright landscapes wrongly flagged |
 | --- | --- | --- | --- |
-| 50% | 79% | 1.2% | 1.8% |
-| 60% (default) | 75% | 0.8% | 1.3% |
-| 70% | 73% | 0.6% | 0.8% |
-| 80% | 71% | 0.4% | 0.6% |
+| 50% | 86% | 0.9% | 1.4% |
+| 60% (default) | 85% | 0.8% | 1.1% |
+| 70% | 84% | 0.5% | 0.7% |
+| 80% | 82% | 0.3% | 0.4% |
 
-Across all kinds of photo (not just landscapes), at the default 60% the scene model finds 54% of rotated photos,
-turns 1.1% the wrong way, and wrongly flags 1.6% of upright ones. Close-ups, textures, food shot from above and other
-photos with no clear "up" are where it's unsure, and those stay **Not enough to judge**. The full tables for every
-threshold are in `SceneModelWeights.summary`.
+Across all kinds of photo (not just landscapes), at the default 60% the network finds 70% of rotated photos, turns
+1.5% the wrong way, and wrongly flags 2.2% of upright ones; at 80% it's 63%, 0.5% and 0.8%. Close-ups, textures,
+food shot from above and other photos with no clear "up" are where it's unsure, and those stay **Not enough to
+judge**. Full tables: `Models/OrientationNet-report-coreml.txt`.
 
-What these numbers mean for a big library: if 150,000 of your photos have no faces, roughly 2,000 upright ones
-will be flagged at the default setting (about 1,000 at 80%). They're never changed unless you tick them. Raise **Minimum confidence** on
-the review screen to see fewer false alarms (and find fewer rotated photos). The test photos come from Unsplash, so
-they're more polished than typical phone photos; your library may score differently.
+For comparison, the lighter scene model it replaces found 75% of rotated landscapes at 60% (1.3% wrongly flagged)
+and 71% at 80% (0.6%), on the same test photos.
 
-### How the scene model was trained
+What these numbers mean for a big library: if 150,000 of your photos have no faces, roughly 3,000 upright ones
+will be flagged at the default setting, and about 1,200 at 80%. They're never changed unless you tick them. Raise
+**Minimum confidence** on the review screen to see fewer false alarms (and find fewer rotated photos). The test
+photos come from Unsplash, so they're more polished than typical phone photos; your library may score differently.
 
-The model is trained by `.github/workflows/train-scene-model.yml` on 12,000 photos from the
-[Unsplash Lite dataset](https://github.com/unsplash/datasets) (Unsplash License). No one labels anything: each photo
-is assumed upright and shown to the model turned all four ways. Photos are split into training (75%), validation
-(10%, used to pick the model size) and test (15%, reported above). The trained weights are about 1 MB and are built
-into the app (`Sources/PhotoRotator/Detection/SceneModelWeights.swift`). Things that were tried and measured, and
-didn't help: a bigger network (256 vs 128 hidden units: +0.1%), and separate feature prints of the top and bottom
-halves of each photo (no change, at three times the cost).
+### How the network was trained
+
+`.github/workflows/train-orientation-net.yml` fine-tunes an ImageNet-pretrained MobileNetV3-Large (from
+torchvision) on the 25,000 photos of the [Unsplash Lite dataset](https://github.com/unsplash/datasets) (Unsplash
+License), on a GitHub Linux runner. No one labels anything: each photo is assumed upright and shown turned a random
+number of quarter turns, with random crops, mirroring and colour changes. Photos are split by name into training
+(75%), validation (10%, used to keep the best epoch) and test (15%). The model is converted to Core ML (8 MB,
+16-bit) and committed to `Models/OrientationNet.mlpackage`; then
+`.github/workflows/evaluate-orientation-net.yml` runs it through Vision on a Mac exactly as the app does and
+commits the report above. The build script compiles the model into the app.
+
+Training ran 14 epochs (about 4½ hours on CPU) and reached 85.3% single-pass validation accuracy. The four-pass
+average the app uses does better than any single pass. A larger network, more training time, or more photos would
+likely improve it further.
+
+The lighter scene model (`Tools/TrainOrientationModel`, a small classifier on Vision's feature print plus a
+colour-and-edge layout map) is kept as the fallback for builds without the network.
 
 ### Optional: add a Core ML orientation model
 
@@ -153,7 +165,10 @@ which way the model's other labels count. Use this if you have a stronger orient
 ```
 Sources/RotatorCore/         Decision logic, scene classifier and trainer, layout features (no Apple frameworks)
 Sources/RotatorVision/       Vision feature extraction shared by the app and the trainer
-Tools/TrainOrientationModel/ Trains the scene model (run by .github/workflows/train-scene-model.yml)
+Tools/TrainOrientationNet/   Fine-tunes the orientation network (run by .github/workflows/train-orientation-net.yml)
+Tools/EvaluateOrientationNet/ Scores the Core ML network through Vision on held-out photos
+Tools/TrainOrientationModel/ Trains the fallback scene model (run by .github/workflows/train-scene-model.yml)
+Models/                      The trained orientation network and its evaluation reports
 Sources/PhotoRotator/
   App/                       App entry point and state (AppModel)
   Library/PhotoLibrary.swift PhotoKit access: authorization, fetching, thumbnails
