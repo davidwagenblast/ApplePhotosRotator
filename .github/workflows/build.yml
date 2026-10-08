@@ -12,8 +12,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: Swift version
         run: swift --version
+      - name: Fetch a test photo of a person
+        # NASA portrait of astronaut Eileen Collins (public domain), as shipped with scikit-image.
+        run: curl -fsSL -o "$RUNNER_TEMP/astronaut.png" https://raw.githubusercontent.com/scikit-image/scikit-image/v0.24.0/skimage/data/astronaut.png
       - name: Unit tests
-        run: swift test
+        env:
+          FACE_IMAGE: ${{ runner.temp }}/astronaut.png
+        run: swift test 2>&1 | tee test.log; exit ${PIPESTATUS[0]}
       - name: Build app bundle
         run: scripts/build_app.sh
       - name: Verify bundle
