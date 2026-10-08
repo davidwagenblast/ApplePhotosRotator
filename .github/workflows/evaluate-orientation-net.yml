@@ -1,0 +1,70 @@
+name: Evaluate orientation network
+
+# Runs the committed Core ML orientation network through Vision exactly as the app does, on the scene model's
+# held-out Unsplash test photos, and commits the report next to the model.
+on:
+  workflow_call:
+  workflow_dispatch:
+  push:
+    branches: ['claude/**']
+    paths:
+      - 'Tools/EvaluateOrientationNet/**'
+      - 'Sources/RotatorVision/OrientationNetwork.swift'
+      - '.github/workflows/evaluate-orientation-net.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  evaluate:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The latest commit on the branch, including a model the training job has just pushed.
+          ref: ${{ github.ref_name }}
+      - name: Check for a model
+        id: model
+        run: |
+          if [ -d Models/OrientationNet.mlpackage ]; then echo "present=true" >> "$GITHUB_OUTPUT"; else echo "No model in Models/"; fi
+      - name: Restore the test photos
+        if: steps.model.outputs.present == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: training-data
+          key: unsplash-lite-12000-${{ hashFiles('Tools/TrainOrientationModel/prepare_unsplash.py') }}
+          fail-on-cache-miss: true
+      - name: List the held-out test photos
+        if: steps.model.outputs.present == 'true'
+        # The same FNV-1a split as every other tool: buckets 0-14 are never used for training.
+        run: |
+          python3 - <<'PY'
+          import os
+          def bucket(name):
+              h = 0xCBF29CE484222325
+              for b in name.encode():
+                  h = ((h ^ b) * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
+              return h % 100
+          names = sorted(n for n in os.listdir("training-data/images") if n.lower().endswith(".jpg") and bucket(n) < 15)
+          open("test.txt", "w").write("\n".join(names) + "\n")
+          print(len(names), "test photos")
+          PY
+      - if: steps.model.outputs.present == 'true'
+        run: swift build -c release --product evaluate-orientation-net
+      - name: Evaluate through Vision
+        if: steps.model.outputs.present == 'true'
+        run: |
+          .build/release/evaluate-orientation-net --model Models/OrientationNet.mlpackage \
+            --images training-data/images --names test.txt --landscapes training-data/landscapes.txt \
+            --output Models/OrientationNet-report-coreml.txt
+      - name: Commit the report
+        if: steps.model.outputs.present == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add Models/OrientationNet-report-coreml.txt
+          if git diff --cached --quiet; then echo "Report unchanged"; exit 0; fi
+          git commit -m "Update orientation network evaluation"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

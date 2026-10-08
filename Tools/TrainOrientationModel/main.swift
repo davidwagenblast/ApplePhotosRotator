@@ -213,68 +213,12 @@ for configuration in configurations {
 
 // MARK: Evaluate on the held-out test photos, through the app's decision logic
 
-struct Tally {
-    var uprightPhotos = 0
-    var rotatedPhotos = 0
-    var falseProposals: [Int]
-    var correctProposals: [Int]
-    var wrongDirection: [Int]
-
-    init(thresholds: Int) {
-        falseProposals = Array(repeating: 0, count: thresholds)
-        correctProposals = Array(repeating: 0, count: thresholds)
-        wrongDirection = Array(repeating: 0, count: thresholds)
-    }
-}
-
-let thresholds = [0.3, 0.5, 0.6, 0.7, 0.8]
-let decider = OrientationDecider()
-var everything = Tally(thresholds: thresholds.count)
-var landscapes = Tally(thresholds: thresholds.count)
-
+var everything = OrientationEvaluation(weight: 0.9)
+var landscapes = OrientationEvaluation(weight: 0.9)
 for name in testNames {
-    for truthTurns in 0..<4 {
-        // The photo as it sits in the library needs `truth`; in pass r Vision turns it by r, so it then needs truth - r.
-        var scores: [Rotation: Double] = [:]
-        for pass in 0..<4 {
-            let p = model.probabilities(input(name, needing: (truthTurns - pass + 4) % 4))
-            scores.merge(OrientationClassifier.passScores(p, pass: Rotation(degrees: 90 * pass))) { $0 + $1 }
-        }
-        let decision = decider.decide([DetectorEvidence(detector: "scene", weight: 0.9, uprightScores: scores)])
-        let truth = Rotation(degrees: 90 * truthTurns)
-        let isLandscape = landscapeNames.contains(name)
-        for (t, threshold) in thresholds.enumerated() {
-            let proposed = decision.status == .needsRotation && decision.confidence >= threshold
-            func count(_ tally: inout Tally) {
-                if truth == Rotation.none {
-                    if t == 0 { tally.uprightPhotos += 1 }
-                    if proposed { tally.falseProposals[t] += 1 }
-                } else {
-                    if t == 0 { tally.rotatedPhotos += 1 }
-                    if proposed && decision.rotation == truth { tally.correctProposals[t] += 1 }
-                    if proposed && decision.rotation != truth { tally.wrongDirection[t] += 1 }
-                }
-            }
-            count(&everything)
-            if isLandscape { count(&landscapes) }
-        }
-    }
-}
-
-func report(_ title: String, _ tally: Tally) -> String {
-    func pct(_ n: Int, _ total: Int, width: Int) -> String {
-        let text = total == 0 ? "—" : String(format: "%.1f%%", 100 * Double(n) / Double(total))
-        return String(repeating: " ", count: max(0, width - text.count)) + text
-    }
-    var lines = ["\(title): \(tally.uprightPhotos) upright and \(tally.rotatedPhotos) rotated test cases",
-                 "  min confidence | rotated: found correctly | rotated: wrong direction | upright: wrongly proposed"]
-    for (t, threshold) in thresholds.enumerated() {
-        lines.append(String(format: "  %13.0f%%", threshold * 100)
-            + " | " + pct(tally.correctProposals[t], tally.rotatedPhotos, width: 24)
-            + " | " + pct(tally.wrongDirection[t], tally.rotatedPhotos, width: 24)
-            + " | " + pct(tally.falseProposals[t], tally.uprightPhotos, width: 25))
-    }
-    return lines.joined(separator: "\n")
+    let probabilities = (0..<4).map { model.probabilities(input(name, needing: $0)) }
+    everything.add(probabilities)
+    if landscapeNames.contains(name) { landscapes.add(probabilities) }
 }
 
 let testAccuracy = model.accuracy(on: samples(testNames))
@@ -283,9 +227,9 @@ Scene orientation model: Vision feature print revision 2 + 8×8 colour and edge 
 Trained on \(trainNames.count) photos (×4 rotations); validated on \(validationNames.count); tested on \(testNames.count) held-out photos.
 Single-pass test accuracy: \(String(format: "%.1f%%", 100 * testAccuracy)).
 
-\(report("All test photos", everything))
+\(everything.report(title: "All test photos"))
 
-\(report("Landscape test photos (\(testNames.filter { landscapeNames.contains($0) }.count) photos)", landscapes))
+\(landscapes.report(title: "Landscape test photos (\(testNames.filter { landscapeNames.contains($0) }.count) photos)"))
 """
 log("\n" + summary)
 

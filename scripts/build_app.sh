@@ -21,6 +21,16 @@ cp "$BIN_DIR/PhotoRotator" "$APP/Contents/MacOS/PhotoRotator"
 cp Support/Info.plist "$APP/Contents/Info.plist"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
+# The orientation network. Compiled now if Xcode's Core ML compiler is available; otherwise the package is bundled
+# as is and the app compiles it once on first use.
+if [ -d Models/OrientationNet.mlpackage ]; then
+    if xcrun --find coremlcompiler >/dev/null 2>&1; then
+        xcrun coremlcompiler compile Models/OrientationNet.mlpackage "$APP/Contents/Resources" >/dev/null
+    else
+        cp -R Models/OrientationNet.mlpackage "$APP/Contents/Resources/"
+    fi
+fi
+
 codesign --force --sign - --entitlements Support/PhotoRotator.entitlements "$APP"
 
 echo "Built $APP"

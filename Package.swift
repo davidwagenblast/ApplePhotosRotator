@@ -7,6 +7,7 @@ let package = Package(
     products: [
         .executable(name: "PhotoRotator", targets: ["PhotoRotator"]),
         .executable(name: "train-orientation-model", targets: ["TrainOrientationModel"]),
+        .executable(name: "evaluate-orientation-net", targets: ["EvaluateOrientationNet"]),
         .library(name: "RotatorCore", targets: ["RotatorCore"]),
     ],
     targets: [
@@ -26,6 +27,12 @@ let package = Package(
             dependencies: ["RotatorCore", "RotatorVision"],
             path: "Tools/TrainOrientationModel",
             exclude: ["prepare_unsplash.py"]
+        ),
+        // Scores the fine-tuned orientation network through Vision (see .github/workflows/train-orientation-net.yml).
+        .executableTarget(
+            name: "EvaluateOrientationNet",
+            dependencies: ["RotatorCore", "RotatorVision"],
+            path: "Tools/EvaluateOrientationNet"
         ),
         .testTarget(name: "RotatorCoreTests", dependencies: ["RotatorCore"]),
         // Runs the real Vision pipeline on synthetic images (macOS only).

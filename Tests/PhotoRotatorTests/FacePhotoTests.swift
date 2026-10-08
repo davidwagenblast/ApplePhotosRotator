@@ -1,4 +1,5 @@
 import ImageIO
+import RotatorVision
 import XCTest
 @testable import PhotoRotator
 @testable import RotatorCore
@@ -46,6 +47,27 @@ final class FacePhotoTests: XCTestCase {
             let expected = Rotation(degrees: 90 * turns)
             let result = try analyzer.analyze(image)
             print("body only, turned \(turns * 90)° CCW → \(result.decision.rotation) \(result.decision.status) conf=\(result.decision.confidence) [\(result.summary)]")
+            if result.decision.status == .needsRotation || result.decision.status == .upright {
+                XCTAssertEqual(result.decision.rotation, expected, result.summary)
+            }
+        }
+    }
+
+    /// The fine-tuned network on its own, through the app's analyzer: a clear portrait must never be turned the wrong
+    /// way. Skipped until a trained model has been committed to Models/.
+    func testOrientationNetworkOnAPortrait() throws {
+        let upright = try uprightPhoto()
+        let modelURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Models/OrientationNet.mlpackage")
+        guard FileManager.default.fileExists(atPath: modelURL.path) else { throw XCTSkip("No trained network in Models/") }
+        var analyzer = analyzer(faces: false, body: false)
+        analyzer.stages = [[OrientationNetDetector(network: try OrientationNetwork.load(from: modelURL))]]
+        for turns in 0...3 {
+            let image = OrientationPipelineTests.turnedCounterClockwise(upright, quarterTurns: turns)
+            let expected = Rotation(degrees: 90 * turns)
+            let result = try analyzer.analyze(image)
+            print("network only, turned \(turns * 90)° CCW → \(result.decision.rotation) \(result.decision.status) conf=\(result.decision.confidence) [\(result.summary)]")
             if result.decision.status == .needsRotation || result.decision.status == .upright {
                 XCTAssertEqual(result.decision.rotation, expected, result.summary)
             }

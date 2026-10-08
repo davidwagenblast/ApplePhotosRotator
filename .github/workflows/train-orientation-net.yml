@@ -1,0 +1,82 @@
+name: Train orientation network
+
+# Fine-tunes the orientation network on Unsplash Lite photos (Linux, CPU) and commits the Core ML model to the branch,
+# then evaluates it through Vision on a Mac (evaluate-orientation-net.yml).
+on:
+  push:
+    branches: ['claude/**']
+    paths:
+      - 'Tools/TrainOrientationNet/**'
+      - '.github/workflows/train-orientation-net.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: train-orientation-net-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PHOTO_COUNT: 25000
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PyTorch and Core ML Tools
+        run: |
+          pip install --quiet torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cpu
+          pip install --quiet coremltools==9.0 numpy pillow
+
+      - name: Restore training photos
+        id: photos
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            work/resized
+            training-data/landscapes.txt
+          key: orientation-net-photos-${{ env.PHOTO_COUNT }}-${{ hashFiles('Tools/TrainOrientationModel/prepare_unsplash.py') }}
+      - name: Download and resize training photos
+        if: steps.photos.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/unsplash-lite.zip" https://unsplash.com/data/lite/latest
+          python3 Tools/TrainOrientationModel/prepare_unsplash.py "$RUNNER_TEMP/unsplash-lite.zip" training-data "$PHOTO_COUNT"
+          python3 Tools/TrainOrientationNet/train.py --images training-data/images --work work --out net-output --prepare-only
+      - name: Save training photos
+        if: steps.photos.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            work/resized
+            training-data/landscapes.txt
+          key: orientation-net-photos-${{ env.PHOTO_COUNT }}-${{ hashFiles('Tools/TrainOrientationModel/prepare_unsplash.py') }}
+
+      - name: Train, test and export
+        run: |
+          mkdir -p training-data/images
+          python3 Tools/TrainOrientationNet/train.py --images training-data/images --work work --out net-output \
+            --landscapes training-data/landscapes.txt --time-budget-minutes 270
+      - name: Commit the model
+        run: |
+          rm -rf Models/OrientationNet.mlpackage
+          mkdir -p Models
+          cp -R net-output/OrientationNet.mlpackage Models/
+          cp net-output/report-pytorch.txt Models/OrientationNet-report-pytorch.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add Models
+          git commit -m "Update orientation network"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+  evaluate:
+    needs: train
+    uses: ./.github/workflows/evaluate-orientation-net.yml
+    permissions:
+      contents: write

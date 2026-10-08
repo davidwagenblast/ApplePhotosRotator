@@ -45,12 +45,14 @@ struct ScanView: View {
                 Toggle("People (body pose)", isOn: $model.settings.useBodyPose)
                 Toggle("Text", isOn: $model.settings.useText)
                 Toggle(isOn: $model.settings.useScene) {
-                    Text("Landscapes and other scenes")
-                    Text(SceneDetector.builtIn == nil
-                        ? "The built-in scene model isn't included in this build."
-                        : "Built-in model: sky above ground, buildings and trees pointing up.")
+                    Text("Landscapes, buildings and other scenes")
+                    Text(OrientationNetDetector.isAvailable
+                        ? "Built-in orientation network, trained to tell which way any photo is turned."
+                        : SceneDetector.builtIn != nil
+                            ? "Built-in scene model: sky above ground, buildings and trees pointing up."
+                            : "No scene model is included in this build.")
                 }
-                .disabled(SceneDetector.builtIn == nil)
+                .disabled(!OrientationNetDetector.isAvailable && SceneDetector.builtIn == nil)
                 LabeledContent("Core ML orientation model") {
                     HStack {
                         Text(model.settings.modelPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "None")

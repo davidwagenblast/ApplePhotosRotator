@@ -35,7 +35,14 @@ struct OrientationAnalyzer: Sendable {
         // Body pose and the scene model both look at all four orientations, so they share one set of passes.
         var fourPass: [any OrientationDetector] = []
         if settings.useBodyPose { fourPass.append(BodyPoseDetector()) }
-        if settings.useScene, let scene = SceneDetector.builtIn { fourPass.append(SceneDetector(classifier: scene)) }
+        if settings.useScene {
+            // The fine-tuned network when this build includes it; otherwise the lighter scene model.
+            if let network = OrientationNetDetector.builtIn {
+                fourPass.append(OrientationNetDetector(network: network))
+            } else if let scene = SceneDetector.builtIn {
+                fourPass.append(SceneDetector(classifier: scene))
+            }
+        }
         if !fourPass.isEmpty { stages.append(fourPass) }
         if settings.useText { stages.append([TextDetector()]) }
         if let model { stages.append([model]) }

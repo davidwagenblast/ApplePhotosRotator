@@ -245,3 +245,43 @@ struct SceneDetector: OrientationDetector {
         return OrientationClassifier.passScores(classifier.probabilities(input), pass: pass)
     }
 }
+
+/// The fine-tuned orientation network: an image-recognition network trained specifically to tell which way a photo
+/// is turned. It covers every kind of photo — landscapes, buildings, objects, people — and is the main cue for photos
+/// without faces. Like the scene model, it runs on all four orientations and averages the four estimates.
+struct OrientationNetDetector: SingleRequestDetector {
+    let name = "network"
+    let weight = 1.0
+    let runsOnce = false
+    let network: OrientationNetwork
+
+    /// The network bundled with the app (compiled at build time, or compiled once on first use), or `nil` if this
+    /// build doesn't include one. `PHOTO_ROTATOR_ORIENTATION_NET` can point at a model for development.
+    static let builtIn: OrientationNetwork? = {
+        let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("PhotoRotator", isDirectory: true)
+        let candidates = [
+            ProcessInfo.processInfo.environment["PHOTO_ROTATOR_ORIENTATION_NET"].map { URL(fileURLWithPath: $0) },
+            Bundle.main.url(forResource: "OrientationNet", withExtension: "mlmodelc"),
+            Bundle.main.url(forResource: "OrientationNet", withExtension: "mlpackage"),
+        ]
+        for case let url? in candidates {
+            if let network = try? OrientationNetwork.load(from: url, cacheDirectory: cache) { return network }
+        }
+        return nil
+    }()
+
+    /// Whether a network is available, without loading (and possibly compiling) it.
+    static var isAvailable: Bool {
+        ProcessInfo.processInfo.environment["PHOTO_ROTATOR_ORIENTATION_NET"] != nil
+            || Bundle.main.url(forResource: "OrientationNet", withExtension: "mlmodelc") != nil
+            || Bundle.main.url(forResource: "OrientationNet", withExtension: "mlpackage") != nil
+    }
+
+    func makeRequest() -> VNRequest { network.makeRequest() }
+
+    func uprightScores(of request: VNRequest, image: CGImage, frameSize: CGSize, pass: Rotation) -> [Rotation: Double] {
+        guard let p = OrientationNetwork.probabilities(from: request) else { return [:] }
+        return OrientationClassifier.passScores(p, pass: pass)
+    }
+}
