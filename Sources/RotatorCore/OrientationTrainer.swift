@@ -95,7 +95,7 @@ public struct OrientationTrainer {
                                 }
                                 let p = softmax(logits)
                                 let y = Y[k]
-                                loss -= log(max(p[y], 1e-12))
+                                loss -= Foundation.log(max(p[y], 1e-12))
                                 if p.indices.max(by: { p[$0] < p[$1] }) == y { correct += 1 }
 
                                 // Backward.
