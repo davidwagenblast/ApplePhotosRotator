@@ -4,6 +4,8 @@ struct ScanSettings: Codable, Equatable, Sendable {
     var useFaces = true
     var useBodyPose = true
     var useText = true
+    /// The built-in scene model, for photos without people or text (landscapes, buildings, objects).
+    var useScene = true
     /// Optional Core ML orientation classifier (see README).
     var modelPath: String?
 

@@ -2,6 +2,7 @@ import AppKit
 import CoreML
 import Foundation
 import RotatorCore
+import RotatorVision
 import Vision
 
 /// A Vision-based signal for which correction makes a photo upright.
@@ -201,5 +202,28 @@ struct CoreMLDetector: PerPassDetector, @unchecked Sendable {
         guard let classes = request.results as? [VNClassificationObservation] else { return 0 }
         let upright = classes.first { Self.uprightLabels.contains($0.identifier.lowercased().trimmingCharacters(in: .whitespaces)) }
         return Double(upright?.confidence ?? 0)
+    }
+}
+
+/// Landscapes, buildings, objects — anything. A small classifier, trained on thousands of photos turned all four
+/// ways, reads Vision's feature print of the scene and estimates which correction it needs (sky above ground,
+/// trees and buildings pointing up, and so on). It runs on all four orientations and the four estimates are
+/// averaged, which cancels out direction biases in the model.
+struct SceneDetector: OrientationDetector {
+    let name = "scene"
+    let weight = 0.9
+    let runsOnce = false
+    let classifier: OrientationClassifier
+
+    /// The model built into the app, or `nil` if it has not been trained into this build.
+    static let builtIn: OrientationClassifier? = Data(base64Encoded: SceneModelWeights.encoded)
+        .flatMap { try? OrientationClassifier(data: $0) }
+        .flatMap { $0.inputSize == SceneFeatures.dimension ? $0 : nil }
+
+    func makeRequest() -> VNRequest { SceneFeatures.makeRequest() }
+
+    func uprightScores(of request: VNRequest, frameSize: CGSize, pass: Rotation) -> [Rotation: Double] {
+        guard let features = SceneFeatures.vector(from: request) else { return [:] }
+        return OrientationClassifier.passScores(classifier.probabilities(features), pass: pass)
     }
 }

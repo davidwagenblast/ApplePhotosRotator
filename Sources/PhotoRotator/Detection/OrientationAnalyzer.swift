@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import RotatorCore
+import RotatorVision
 import Vision
 
 /// Runs the detectors over one image and decides whether it needs rotating.
@@ -31,7 +32,11 @@ struct OrientationAnalyzer: Sendable {
         var stages: [[any OrientationDetector]] = []
         // Faces first: one Vision request per photo, and usually decisive when present.
         if settings.useFaces { stages.append([FaceDetector()]) }
-        if settings.useBodyPose { stages.append([BodyPoseDetector()]) }
+        // Body pose and the scene model both look at all four orientations, so they share one set of passes.
+        var fourPass: [any OrientationDetector] = []
+        if settings.useBodyPose { fourPass.append(BodyPoseDetector()) }
+        if settings.useScene, let scene = SceneDetector.builtIn { fourPass.append(SceneDetector(classifier: scene)) }
+        if !fourPass.isEmpty { stages.append(fourPass) }
         if settings.useText { stages.append([TextDetector()]) }
         if let model { stages.append([model]) }
         self.stages = stages
@@ -63,7 +68,7 @@ struct OrientationAnalyzer: Sendable {
             let handler = VNImageRequestHandler(cgImage: image, orientation: pass.cgOrientation, options: [:])
             try handler.perform(requests)
             for (request, i) in zip(requests, active) {
-                scores[i].merge(detectors[i].uprightScores(of: request, frameSize: size, pass: pass)) { max($0, $1) }
+                scores[i].merge(detectors[i].uprightScores(of: request, frameSize: size, pass: pass)) { $0 + $1 }
             }
         }
         return detectors.enumerated().map { i, d in

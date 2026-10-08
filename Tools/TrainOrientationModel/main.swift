@@ -1,0 +1,242 @@
+// Trains the built-in scene orientation model.
+//
+//   train-orientation-model --images DIR --cache FILE --output FILE [--landscapes FILE]
+//                           [--hidden 128] [--epochs 30]
+//
+// Every photo in DIR is assumed to be upright. Each one is shown to Vision turned all four ways, so the labels come
+// for free. Photos are split by name into training (75%), validation (10%) and test (15%) sets; the test photos are
+// never seen during training and are scored through the same decision logic the app uses.
+
+import Foundation
+import ImageIO
+import RotatorCore
+import RotatorVision
+
+// MARK: Options
+
+var options: [String: String] = [:]
+var argumentIterator = CommandLine.arguments.dropFirst().makeIterator()
+while let key = argumentIterator.next() {
+    guard key.hasPrefix("--"), let value = argumentIterator.next() else {
+        FileHandle.standardError.write("Unexpected argument \(key)\n".data(using: .utf8)!)
+        exit(2)
+    }
+    options[String(key.dropFirst(2))] = value
+}
+guard let imagesDir = options["images"], let cachePath = options["cache"], let outputPath = options["output"] else {
+    print("usage: train-orientation-model --images DIR --cache FILE --output FILE [--landscapes FILE] [--hidden N] [--epochs N]")
+    exit(2)
+}
+let landscapeNames = Set((options["landscapes"].flatMap { try? String(contentsOfFile: $0, encoding: .utf8) } ?? "")
+    .split(whereSeparator: \.isNewline).map(String.init))
+
+func log(_ message: String) {
+    print(message)
+    fflush(stdout)
+}
+
+// MARK: Feature cache
+// Each record: UInt16 name length, UTF-8 name, then 4 × dimension Float32 — the features of the photo turned so it
+// needs 0, 1, 2 and 3 quarter turns clockwise. A record of all zeros marks a photo that could not be used.
+
+let dimension = SceneFeatures.dimension
+var features: [String: [[Float]]] = [:]
+
+if let data = FileManager.default.contents(atPath: cachePath) {
+    var offset = 0
+    let recordFloats = 4 * dimension
+    while offset + 2 <= data.count {
+        let length = Int(data[offset]) | Int(data[offset + 1]) << 8
+        let end = offset + 2 + length + recordFloats * 4
+        guard end <= data.count, let name = String(data: data[(offset + 2)..<(offset + 2 + length)], encoding: .utf8) else { break }
+        let floats: [Float] = data[(offset + 2 + length)..<end].withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+        features[name] = (0..<4).map { Array(floats[($0 * dimension)..<(($0 + 1) * dimension)]) }
+        offset = end
+    }
+    log("Loaded cached features for \(features.count) photos")
+}
+
+let allNames = ((try? FileManager.default.contentsOfDirectory(atPath: imagesDir)) ?? [])
+    .filter { $0.lowercased().hasSuffix(".jpg") }
+    .sorted()
+let missing = allNames.filter { features[$0] == nil }
+log("\(allNames.count) photos, \(missing.count) need feature extraction")
+
+if !missing.isEmpty {
+    if !FileManager.default.fileExists(atPath: cachePath) {
+        FileManager.default.createFile(atPath: cachePath, contents: nil)
+    }
+    let cacheHandle = try FileHandle(forWritingTo: URL(fileURLWithPath: cachePath))
+    try cacheHandle.seekToEnd()
+    let lock = NSLock()
+    var done = 0
+    let started = Date()
+
+    DispatchQueue.concurrentPerform(iterations: missing.count) { index in
+        let name = missing[index]
+        let vectors: [[Float]] = autoreleasepool {
+            let url = URL(fileURLWithPath: imagesDir).appendingPathComponent(name)
+            let thumbnailOptions: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: 768,
+            ]
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+                  let image = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions as CFDictionary)
+            else { return [] }
+            var result: [[Float]] = []
+            for quarterTurns in 0..<4 {
+                // To make a frame that needs `c` clockwise, turn the upright photo by the inverse of `c`.
+                let needed = Rotation(degrees: 90 * quarterTurns)
+                guard let vector = try? SceneFeatures.features(of: image, rotatedBy: needed.inverse) else { return [] }
+                result.append(vector)
+            }
+            return result
+        }
+        let stored = vectors.count == 4 ? vectors : Array(repeating: [Float](repeating: 0, count: dimension), count: 4)
+
+        var record = Data()
+        let nameData = name.data(using: .utf8)!
+        record.append(UInt8(nameData.count & 0xFF))
+        record.append(UInt8(nameData.count >> 8))
+        record.append(nameData)
+        for vector in stored { vector.withUnsafeBytes { record.append(contentsOf: $0) } }
+
+        lock.lock()
+        features[name] = stored
+        cacheHandle.write(record)
+        done += 1
+        if done % 500 == 0 || done == missing.count {
+            let rate = Double(done) / Date().timeIntervalSince(started)
+            log(String(format: "  features: %d/%d (%.1f photos/s)", done, missing.count, rate))
+        }
+        lock.unlock()
+    }
+    try cacheHandle.close()
+}
+
+// MARK: Split
+
+/// FNV-1a, so a photo always lands in the same split however many photos there are.
+func bucket(_ name: String) -> Int {
+    var hash: UInt64 = 0xCBF2_9CE4_8422_2325
+    for byte in name.utf8 { hash = (hash ^ UInt64(byte)) &* 0x100_0000_01B3 }
+    return Int(hash % 100)
+}
+
+let usable = allNames.filter { name in features[name].map { !$0[0].allSatisfy { $0 == 0 } } ?? false }
+let testNames = usable.filter { bucket($0) < 15 }
+let validationNames = usable.filter { (15..<25).contains(bucket($0)) }
+let trainNames = usable.filter { bucket($0) >= 25 }
+log("Usable photos: \(usable.count) — train \(trainNames.count), validation \(validationNames.count), test \(testNames.count)")
+
+func samples(_ names: [String]) -> [LabeledFeatures] {
+    names.flatMap { name in (0..<4).map { LabeledFeatures(features: features[name]![$0], label: $0) } }
+}
+
+// MARK: Train
+
+var trainer = OrientationTrainer()
+trainer.hiddenSize = Int(options["hidden"] ?? "") ?? 128
+trainer.epochs = Int(options["epochs"] ?? "") ?? 30
+log("Training: hidden \(trainer.hiddenSize), epochs \(trainer.epochs)")
+let trainingStarted = Date()
+let model = trainer.train(samples(trainNames), validation: samples(validationNames), log: log)
+log(String(format: "Training took %.0f s", Date().timeIntervalSince(trainingStarted)))
+
+// MARK: Evaluate on the held-out test photos, through the app's decision logic
+
+struct Tally {
+    var uprightPhotos = 0
+    var rotatedPhotos = 0
+    var falseProposals: [Int]
+    var correctProposals: [Int]
+    var wrongDirection: [Int]
+
+    init(thresholds: Int) {
+        falseProposals = Array(repeating: 0, count: thresholds)
+        correctProposals = Array(repeating: 0, count: thresholds)
+        wrongDirection = Array(repeating: 0, count: thresholds)
+    }
+}
+
+let thresholds = [0.3, 0.5, 0.7, 0.8, 0.9]
+let decider = OrientationDecider()
+var everything = Tally(thresholds: thresholds.count)
+var landscapes = Tally(thresholds: thresholds.count)
+
+for name in testNames {
+    let turned = features[name]!
+    for truthTurns in 0..<4 {
+        // The photo as it sits in the library needs `truth`; in pass r Vision turns it by r, so it then needs truth - r.
+        var scores: [Rotation: Double] = [:]
+        for pass in 0..<4 {
+            let p = model.probabilities(turned[(truthTurns - pass + 4) % 4])
+            scores.merge(OrientationClassifier.passScores(p, pass: Rotation(degrees: 90 * pass))) { $0 + $1 }
+        }
+        let decision = decider.decide([DetectorEvidence(detector: "scene", weight: 0.9, uprightScores: scores)])
+        let truth = Rotation(degrees: 90 * truthTurns)
+        let isLandscape = landscapeNames.contains(name)
+        for (t, threshold) in thresholds.enumerated() {
+            let proposed = decision.status == .needsRotation && decision.confidence >= threshold
+            func count(_ tally: inout Tally) {
+                if truth == Rotation.none {
+                    if t == 0 { tally.uprightPhotos += 1 }
+                    if proposed { tally.falseProposals[t] += 1 }
+                } else {
+                    if t == 0 { tally.rotatedPhotos += 1 }
+                    if proposed && decision.rotation == truth { tally.correctProposals[t] += 1 }
+                    if proposed && decision.rotation != truth { tally.wrongDirection[t] += 1 }
+                }
+            }
+            count(&everything)
+            if isLandscape { count(&landscapes) }
+        }
+    }
+}
+
+func report(_ title: String, _ tally: Tally) -> String {
+    func pct(_ n: Int, _ total: Int, width: Int) -> String {
+        let text = total == 0 ? "—" : String(format: "%.1f%%", 100 * Double(n) / Double(total))
+        return String(repeating: " ", count: max(0, width - text.count)) + text
+    }
+    var lines = ["\(title): \(tally.uprightPhotos) upright and \(tally.rotatedPhotos) rotated test cases",
+                 "  min confidence | rotated: found correctly | rotated: wrong direction | upright: wrongly proposed"]
+    for (t, threshold) in thresholds.enumerated() {
+        lines.append(String(format: "  %13.0f%%", threshold * 100)
+            + " | " + pct(tally.correctProposals[t], tally.rotatedPhotos, width: 24)
+            + " | " + pct(tally.wrongDirection[t], tally.rotatedPhotos, width: 24)
+            + " | " + pct(tally.falseProposals[t], tally.uprightPhotos, width: 25))
+    }
+    return lines.joined(separator: "\n")
+}
+
+let testAccuracy = model.accuracy(on: samples(testNames))
+let summary = """
+Scene orientation model: Vision feature print revision 2 → \(trainer.hiddenSize > 0 ? "\(trainer.hiddenSize)-unit hidden layer" : "linear") → 4 classes.
+Trained on \(trainNames.count) photos (×4 rotations); validated on \(validationNames.count); tested on \(testNames.count) held-out photos.
+Single-pass test accuracy: \(String(format: "%.1f%%", 100 * testAccuracy)).
+
+\(report("All test photos", everything))
+
+\(report("Landscape test photos (\(testNames.filter { landscapeNames.contains($0) }.count) photos)", landscapes))
+"""
+log("\n" + summary)
+
+// MARK: Write the weights into the app
+
+let indentedSummary = summary.split(separator: "\n", omittingEmptySubsequences: false).map { "    " + $0 }.joined(separator: "\n")
+let source = """
+// Generated by `swift run -c release train-orientation-model`. Do not edit by hand.
+// See .github/workflows/train-scene-model.yml.
+enum SceneModelWeights {
+    static let summary = #\"\"\"
+\(indentedSummary)
+    \"\"\"#
+
+    static let encoded = "\(model.encoded().base64EncodedString())"
+}
+
+"""
+try source.write(toFile: outputPath, atomically: true, encoding: .utf8)
+log("Wrote \(outputPath)")

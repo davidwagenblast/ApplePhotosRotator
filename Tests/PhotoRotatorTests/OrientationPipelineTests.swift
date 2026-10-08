@@ -4,6 +4,7 @@ import ImageIO
 import XCTest
 @testable import PhotoRotator
 @testable import RotatorCore
+import RotatorVision
 
 /// Exercises the real Vision pipeline on synthetic images, without a Photos library.
 ///

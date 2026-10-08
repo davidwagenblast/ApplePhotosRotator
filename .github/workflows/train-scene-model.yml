@@ -1,0 +1,86 @@
+name: Train scene model
+
+# Trains the built-in scene orientation model on Unsplash Lite photos and commits the weights to the branch.
+on:
+  push:
+    branches: ['claude/**']
+    paths:
+      - 'Tools/TrainOrientationModel/**'
+      - 'Sources/RotatorCore/OrientationClassifier.swift'
+      - 'Sources/RotatorCore/OrientationTrainer.swift'
+      - 'Sources/RotatorVision/**'
+      - '.github/workflows/train-scene-model.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: train-scene-model-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PHOTO_COUNT: 12000
+
+jobs:
+  train:
+    runs-on: macos-15
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore training photos
+        id: photos
+        uses: actions/cache/restore@v4
+        with:
+          path: training-data
+          key: unsplash-lite-${{ env.PHOTO_COUNT }}-${{ hashFiles('Tools/TrainOrientationModel/prepare_unsplash.py') }}
+
+      - name: Download training photos
+        if: steps.photos.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/unsplash-lite.zip" https://unsplash.com/data/lite/latest
+          ls -lh "$RUNNER_TEMP/unsplash-lite.zip"
+          python3 Tools/TrainOrientationModel/prepare_unsplash.py "$RUNNER_TEMP/unsplash-lite.zip" training-data "$PHOTO_COUNT"
+
+      - name: Save training photos
+        if: steps.photos.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: training-data
+          key: unsplash-lite-${{ env.PHOTO_COUNT }}-${{ hashFiles('Tools/TrainOrientationModel/prepare_unsplash.py') }}
+
+      - name: Restore extracted features
+        uses: actions/cache/restore@v4
+        with:
+          path: training-cache
+          key: features-${{ hashFiles('Sources/RotatorVision/**') }}-${{ env.PHOTO_COUNT }}-${{ github.run_id }}
+          restore-keys: features-${{ hashFiles('Sources/RotatorVision/**') }}-${{ env.PHOTO_COUNT }}-
+
+      - name: Build trainer
+        run: swift build -c release --product train-orientation-model
+
+      - name: Extract features, train and evaluate
+        run: |
+          mkdir -p training-cache
+          .build/release/train-orientation-model \
+            --images training-data/images \
+            --landscapes training-data/landscapes.txt \
+            --cache training-cache/features.bin \
+            --output Sources/PhotoRotator/Detection/SceneModelWeights.swift
+
+      - name: Save extracted features
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: training-cache
+          key: features-${{ hashFiles('Sources/RotatorVision/**') }}-${{ env.PHOTO_COUNT }}-${{ github.run_id }}
+
+      - name: Commit trained weights
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add Sources/PhotoRotator/Detection/SceneModelWeights.swift
+          if git diff --cached --quiet; then echo "Weights unchanged"; exit 0; fi
+          git commit -m "Update built-in scene orientation model"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

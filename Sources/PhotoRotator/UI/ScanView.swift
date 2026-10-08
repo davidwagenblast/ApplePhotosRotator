@@ -44,6 +44,13 @@ struct ScanView: View {
                 Toggle("Faces", isOn: $model.settings.useFaces)
                 Toggle("People (body pose)", isOn: $model.settings.useBodyPose)
                 Toggle("Text", isOn: $model.settings.useText)
+                Toggle(isOn: $model.settings.useScene) {
+                    Text("Landscapes and other scenes")
+                    Text(SceneDetector.builtIn == nil
+                        ? "The built-in scene model isn't included in this build."
+                        : "Built-in model: sky above ground, buildings and trees pointing up.")
+                }
+                .disabled(SceneDetector.builtIn == nil)
                 LabeledContent("Core ML orientation model") {
                     HStack {
                         Text(model.settings.modelPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "None")
@@ -57,7 +64,7 @@ struct ScanView: View {
             } header: {
                 Text("What to look for")
             } footer: {
-                Text("Faces, people and text are reliable cues but many photos (landscapes, objects) contain none of them; those are reported as \"not enough to judge\" and left alone. An optional Core ML orientation classifier extends coverage — see the README.")
+                Text("Faces are the most reliable cue. The scene model covers photos without people or text, but some photos — close-ups, textures, shots taken straight down — have no clear up, and those are left alone as \"not enough to judge\".")
             }
 
             Section("Speed") {

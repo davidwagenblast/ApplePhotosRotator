@@ -3,6 +3,7 @@ import Foundation
 import ImageIO
 import Photos
 import RotatorCore
+import RotatorVision
 import UniformTypeIdentifiers
 
 /// Applies rotations through PhotoKit's non-destructive editing API — the same mechanism Photos' own Rotate
