@@ -6,7 +6,7 @@ import RotatorVision
 
 final class SceneGridTests: XCTestCase {
     /// An asymmetric test image: red top-left, green top-right, blue bottom, on grey.
-    private func quadrants() -> CGImage {
+    static func quadrants() -> CGImage {
         let w = 400, h = 300
         let context = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
                                 space: CGColorSpace(name: CGColorSpace.sRGB)!,
@@ -24,7 +24,7 @@ final class SceneGridTests: XCTestCase {
     }
 
     func testFirstRowIsTheTopOfTheImage() throws {
-        let grid = try XCTUnwrap(SceneGrid.rgb(of: quadrants()))
+        let grid = try XCTUnwrap(SceneGrid.rgb(of: Self.quadrants()))
         let n = GridFeatures.side
         XCTAssertGreaterThan(grid[0], 0.9, "top-left is red")
         XCTAssertGreaterThan(grid[(n - 1) * 3 + 1], 0.9, "top-right is green")
@@ -34,7 +34,7 @@ final class SceneGridTests: XCTestCase {
     /// The grid rotation must match the EXIF-orientation rotation Vision applies for the same `Rotation`, or the
     /// layout features would describe a different turn than the feature print they are paired with.
     func testGridRotationMatchesVisionOrientation() throws {
-        let image = quadrants()
+        let image = Self.quadrants()
         let grid = try XCTUnwrap(SceneGrid.rgb(of: image))
         let context = CIContext()
         for rotation in Rotation.allCases {
@@ -64,8 +64,8 @@ final class SceneFeaturesRegionTests: XCTestCase {
     /// The "top half" region must be the top half of the frame Vision analysed *after* rotating it, or the model
     /// would learn from different regions than it is shown in the app.
     func testTopRegionIsTopOfTheRotatedFrame() throws {
-        // Text on top, a dark band at the bottom: the two halves look nothing alike.
-        let text = OrientationPipelineTests.textImage()
+        // Red and green on top, blue at the bottom: the two halves look nothing alike, in every orientation.
+        let text = SceneGridTests.quadrants()
         let context = CIContext()
         for rotation in Rotation.allCases {
             let features = try XCTUnwrap(try SceneFeatures.features(of: text, rotatedBy: rotation))
