@@ -76,30 +76,56 @@ editing extensions use, so Photos updates its own database.
 
 ## How detection works
 
-The app has no "is this upright?" model built in, so it uses cues that macOS's Vision framework can measure
-reliably. Each photo is checked as a small thumbnail.
+Each photo is checked as a small thumbnail, using macOS's Vision framework plus a small model trained for this app.
 
 | Cue | How it decides | Weight |
 | --- | --- | --- |
 | **Faces** | Vision finds faces at any angle and reports how far each is tilted. A face tilted about 90° means the photo needs a quarter turn; this needs only one Vision pass per photo. Faces tilted 30–45° from a quarter turn are ignored as ambiguous. | 1.0 |
 | **People (body pose)** | Checked in all four orientations. The orientation where the neck is above the hips gets the credit (for head-and-shoulders shots, the nose above the neck). | 0.8 |
+| **Scenes — landscapes, buildings, objects** | A small built-in model looks at what the photo shows (Vision's image "feature print") together with a coarse colour-and-edge map of where things are (bright sky above darker ground, horizons, upright buildings and trees). It's checked in all four orientations and the four estimates are averaged. | 0.9 |
 | **Text** | Checked in all four orientations. Vision can't read sideways text, and it reads upside-down text as gibberish, so the orientation with the most real dictionary words gets the credit. Vision's own confidence score is ignored because it's the same for gibberish and real text. | 0.7 |
 | **Core ML model** (optional) | Checked in all four orientations. The model's probability for its "upright" class. | 1.0 |
 
 The scores are combined, and the orientation with the highest score wins. Confidence is how far the winner beats
 the runner-up. A photo is only proposed if the winning orientation isn't the current one and the cues agree
-clearly. Photos that already look upright are skipped. The cues run in order (faces, body, text, model), and
-the app stops as soon as one gives a confident answer, so most photos with faces need just one Vision request.
+clearly. Photos that already look upright are skipped. The cues run in order (faces; then body pose and scenes
+together; then text; then your model), and the app stops as soon as it has a confident answer, so most photos with
+faces need just one Vision request.
 
-**What's been checked automatically (CI on a Mac):** a real photo of a person and a page of text are each turned to
-all four orientations. Every time, the app proposes the right fix, and applying that fix makes the image upright
-again. Body pose alone also gets the direction right on the portrait, but at a low 35% confidence, below the
-review screen's default 50% cutoff. These tests don't cover real-world variety: group photos, small faces,
-handwriting, and non-Latin text haven't been tested.
+### How well it works
 
-**Limitation:** photos with no faces, people, or readable text (landscapes, food, pets, objects) usually can't be
-judged by these cues. They're counted as **Not enough to judge** and left alone. Nothing is ever changed without
-your approval, so a missed photo costs nothing. But the app won't find every rotated photo unless you add a model.
+**Faces and text** (CI on a Mac): a real photo of a person and a page of text are each turned to all four
+orientations. Every time, the app proposes the right fix, and applying that fix makes the image upright again.
+
+**Scenes** were measured on 1,777 held-out photos the model never saw in training, each tested in all four
+orientations. Results for the scene model on its own (with faces, body pose and text turned off):
+
+| Review minimum confidence | Rotated landscapes found | Turned the wrong way | Upright landscapes wrongly flagged |
+| --- | --- | --- | --- |
+| 50% | 79% | 1.2% | 1.8% |
+| 60% (default) | ~76% | ~0.9% | ~1.3% |
+| 70% | 73% | 0.6% | 0.8% |
+| 80% | 71% | 0.4% | 0.6% |
+
+Across all kinds of photo (not just landscapes), the scene model finds 59% of rotated photos at 50% and 47% at 80%,
+and wrongly flags 2.2% and 0.7% of upright ones. Close-ups, textures, food shot from above and other photos with no
+clear "up" are where it's unsure, and those stay **Not enough to judge**. The 60% row is interpolated between the
+measured 50% and 70% rows.
+
+What these numbers mean for a big library: if 150,000 of your photos have no faces, roughly 1,000–2,000 upright ones
+will be flagged at the default setting. They're never changed unless you tick them. Raise **Minimum confidence** on
+the review screen to see fewer false alarms (and find fewer rotated photos). The test photos come from Unsplash, so
+they're more polished than typical phone photos; your library may score differently.
+
+### How the scene model was trained
+
+The model is trained by `.github/workflows/train-scene-model.yml` on 12,000 photos from the
+[Unsplash Lite dataset](https://github.com/unsplash/datasets) (Unsplash License). No one labels anything: each photo
+is assumed upright and shown to the model turned all four ways. Photos are split into training (75%), validation
+(10%, used to pick the model size) and test (15%, reported above). The trained weights are about 1 MB and are built
+into the app (`Sources/PhotoRotator/Detection/SceneModelWeights.swift`). Things that were tried and measured, and
+didn't help: a bigger network (256 vs 128 hidden units: +0.1%), and separate feature prints of the top and bottom
+halves of each photo (no change, at three times the cost).
 
 ### Optional: add a Core ML orientation model
 
@@ -107,7 +133,7 @@ Under **What to look for › Core ML orientation model**, choose any Core ML **i
 `.mlpackage`, or a compiled `.mlmodelc`) that has a class for "upright." Name that class `0`, `0°`, `up`,
 `upright`, `none`, or `normal`. For example, a 4-class rotation classifier with labels `0`, `90`, `180`, `270`
 works. The app shows the model each of the four orientations and asks how upright it looks, so it doesn't matter
-which way the model's other labels count. This is the way to cover photos without people or text.
+which way the model's other labels count. Use this if you have a stronger orientation model than the built-in one.
 
 ## Performance at 250,000 photos
 
@@ -125,11 +151,13 @@ which way the model's other labels count. This is the way to cover photos withou
 ## Project layout
 
 ```
-Sources/RotatorCore/         Decision logic (no Apple frameworks; unit tested)
+Sources/RotatorCore/         Decision logic, scene classifier and trainer, layout features (no Apple frameworks)
+Sources/RotatorVision/       Vision feature extraction shared by the app and the trainer
+Tools/TrainOrientationModel/ Trains the scene model (run by .github/workflows/train-scene-model.yml)
 Sources/PhotoRotator/
   App/                       App entry point and state (AppModel)
   Library/PhotoLibrary.swift PhotoKit access: authorization, fetching, thumbnails
-  Detection/                 Vision detectors and the four-orientation analyzer
+  Detection/                 Vision detectors, the four-orientation analyzer, built-in scene model weights
   Scan/                      Parallel, resumable library scan
   Store/ResultStore.swift    SQLite persistence of scan results
   Apply/RotationApplier.swift Non-destructive PhotoKit edits

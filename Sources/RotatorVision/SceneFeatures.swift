@@ -2,9 +2,8 @@ import CoreGraphics
 import RotatorCore
 import Vision
 
-/// Vision's image feature print — a 768-number summary of what a picture shows — of the whole photo and of its top
-/// and bottom halves. Together they say not just *what* is in the photo but *where*: sky-like content in the top half
-/// and ground-like content in the bottom half is the strongest cue there is for which way is up.
+/// Vision's image feature print: a 768-number summary of what a picture shows. The scene model pairs it with
+/// `GridFeatures`, which say where things are.
 ///
 /// The app and the training tool both use this type, so the features the model was trained on are computed exactly
 /// the way the app computes them.
@@ -13,13 +12,12 @@ public enum SceneFeatures {
     public static let revision = VNGenerateImageFeaturePrintRequestRevision2
     public static let printDimension = 768
 
-    /// Whole photo, top half, bottom half — in Vision's normalised coordinates (origin bottom-left) of the frame
-    /// being analysed, so "top" always means the top of that frame.
-    public static let regions = [
-        CGRect(x: 0, y: 0, width: 1, height: 1),
-        CGRect(x: 0, y: 0.5, width: 1, height: 0.5),
-        CGRect(x: 0, y: 0, width: 1, height: 0.5),
-    ]
+    /// Regions of the analysed frame to describe, in Vision's normalised coordinates (origin bottom-left).
+    ///
+    /// Only the whole photo: adding the top and bottom halves was tried and measured — single-pass accuracy on
+    /// held-out photos stayed at 73.8% and the precision/recall trade-off was unchanged — so it isn't worth three
+    /// times the work per photo.
+    public static let regions = [CGRect(x: 0, y: 0, width: 1, height: 1)]
 
     public static var dimension: Int { printDimension * regions.count }
 

@@ -189,7 +189,7 @@ func samples(_ names: [String]) -> [LabeledFeatures] {
 
 // Several sizes and regularisation strengths; the one with the best validation accuracy is kept.
 let trainingSet = samples(trainNames), validationSet = samples(validationNames)
-var configurations: [(hidden: Int, decay: Float)] = [(0, 1e-3), (128, 1e-2), (128, 5e-2)]
+var configurations: [(hidden: Int, decay: Float)] = [(0, 1e-3), (128, 1e-2), (256, 5e-2)]
 if let hidden = options["hidden"].flatMap(Int.init) { configurations = [(hidden, Float(options["decay"] ?? "") ?? 1e-2)] }
 var trainer = OrientationTrainer()
 trainer.epochs = Int(options["epochs"] ?? "") ?? 30
@@ -227,7 +227,7 @@ struct Tally {
     }
 }
 
-let thresholds = [0.3, 0.5, 0.7, 0.8, 0.9]
+let thresholds = [0.3, 0.5, 0.6, 0.7, 0.8]
 let decider = OrientationDecider()
 var everything = Tally(thresholds: thresholds.count)
 var landscapes = Tally(thresholds: thresholds.count)
@@ -279,7 +279,7 @@ func report(_ title: String, _ tally: Tally) -> String {
 
 let testAccuracy = model.accuracy(on: samples(testNames))
 let summary = """
-Scene orientation model: Vision feature prints (revision 2) of the whole photo and its top and bottom halves + 8×8 colour and edge layout → \(trainer.hiddenSize > 0 ? "\(trainer.hiddenSize)-unit hidden layer" : "linear") (weight decay \(trainer.weightDecay)) → 4 classes.
+Scene orientation model: Vision feature print revision 2 + 8×8 colour and edge layout → \(trainer.hiddenSize > 0 ? "\(trainer.hiddenSize)-unit hidden layer" : "linear") (weight decay \(trainer.weightDecay)) → 4 classes.
 Trained on \(trainNames.count) photos (×4 rotations); validated on \(validationNames.count); tested on \(testNames.count) held-out photos.
 Single-pass test accuracy: \(String(format: "%.1f%%", 100 * testAccuracy)).
 
