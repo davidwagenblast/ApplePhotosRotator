@@ -1,0 +1,18 @@
+Core ML model, run through Vision as in the app, on 1777 held-out photos.
+Single-pass accuracy: 82.1%.
+
+All test photos: 1777 upright and 5331 rotated test cases
+  min confidence | rotated: found correctly | rotated: wrong direction | upright: wrongly proposed
+             30% |                    75.9% |                     4.0% |                      6.0%
+             50% |                    71.6% |                     2.0% |                      3.0%
+             60% |                    69.5% |                     1.5% |                      2.2%
+             70% |                    66.6% |                     0.9% |                      1.4%
+             80% |                    62.9% |                     0.5% |                      0.8%
+
+Landscape test photos (710 photos): 710 upright and 2130 rotated test cases
+  min confidence | rotated: found correctly | rotated: wrong direction | upright: wrongly proposed
+             30% |                    87.7% |                     1.6% |                      2.4%
+             50% |                    86.3% |                     0.9% |                      1.4%
+             60% |                    85.2% |                     0.8% |                      1.1%
+             70% |                    83.8% |                     0.5% |                      0.7%
+             80% |                    81.7% |                     0.3% |                      0.4%
