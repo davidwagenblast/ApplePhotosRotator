@@ -29,10 +29,9 @@ struct OrientationAnalyzer: Sendable {
 
     init(settings: ScanSettings, model: CoreMLDetector?) {
         var stages: [[any OrientationDetector]] = []
-        var first: [any OrientationDetector] = []
-        if settings.useFaces { first.append(FaceDetector()) }
-        if settings.useBodyPose { first.append(BodyPoseDetector()) }
-        if !first.isEmpty { stages.append(first) }
+        // Faces first: one Vision request per photo, and usually decisive when present.
+        if settings.useFaces { stages.append([FaceDetector()]) }
+        if settings.useBodyPose { stages.append([BodyPoseDetector()]) }
         if settings.useText { stages.append([TextDetector()]) }
         if let model { stages.append([model]) }
         self.stages = stages
@@ -50,19 +49,21 @@ struct OrientationAnalyzer: Sendable {
         return Result(decision: decision, evidence: evidence)
     }
 
-    /// One `VNImageRequestHandler` per candidate orientation, all of a stage's requests performed together so
-    /// Vision only has to prepare each oriented image once.
+    /// One `VNImageRequestHandler` per candidate orientation, with all of a stage's requests performed together so
+    /// Vision prepares each oriented image only once. Detectors that run once only take part in the first pass.
     private func run(_ detectors: [any OrientationDetector], on image: CGImage) throws -> [DetectorEvidence] {
         var scores = Array(repeating: [Rotation: Double](), count: detectors.count)
-        for rotation in Rotation.allCases {
-            let size = rotation.swapsDimensions
+        let passes: [Rotation] = detectors.allSatisfy(\.runsOnce) ? [Rotation.none] : Rotation.allCases
+        for pass in passes {
+            let active = detectors.indices.filter { pass == Rotation.none || !detectors[$0].runsOnce }
+            let size = pass.swapsDimensions
                 ? CGSize(width: image.height, height: image.width)
                 : CGSize(width: image.width, height: image.height)
-            let requests = detectors.map { $0.makeRequest() }
-            let handler = VNImageRequestHandler(cgImage: image, orientation: rotation.cgOrientation, options: [:])
+            let requests = active.map { detectors[$0].makeRequest() }
+            let handler = VNImageRequestHandler(cgImage: image, orientation: pass.cgOrientation, options: [:])
             try handler.perform(requests)
-            for (i, detector) in detectors.enumerated() {
-                scores[i][rotation] = detector.uprightScore(of: requests[i], frameSize: size)
+            for (request, i) in zip(requests, active) {
+                scores[i].merge(detectors[i].uprightScores(of: request, frameSize: size, pass: pass)) { max($0, $1) }
             }
         }
         return detectors.enumerated().map { i, d in

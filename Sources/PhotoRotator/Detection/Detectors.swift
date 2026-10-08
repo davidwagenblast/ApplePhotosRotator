@@ -1,27 +1,47 @@
+import AppKit
 import CoreML
 import Foundation
 import RotatorCore
 import Vision
 
-/// A Vision-based signal for "this frame looks upright".
+/// A Vision-based signal for which correction makes a photo upright.
 ///
-/// The analyzer shows every detector the same photo four times (once per candidate correction, by passing an
-/// EXIF orientation to `VNImageRequestHandler`), then asks it to score each pass. Because every score is about
-/// the frame Vision analysed, detectors never need to know which way a rotation's sign runs.
+/// Scores are in `0...1` per candidate correction: 0 means "no upright content found after this correction",
+/// 1 means "certainly upright".
 protocol OrientationDetector: Sendable {
     var name: String { get }
     var weight: Double { get }
+    /// `true` for detectors that find their subject at any angle and report that angle (faces). They run once, on
+    /// the photo as displayed, and score every correction from that single result. Other detectors are shown the
+    /// photo once per candidate correction.
+    var runsOnce: Bool { get }
     func makeRequest() -> VNRequest
-    /// How strongly the results of `request` indicate that the analysed frame is upright, in `0...1`.
-    /// `frameSize` is the pixel size of the frame Vision analysed (already rotated).
+    /// Scores keyed by correction. `pass` is the correction Vision applied before analysing, and `frameSize` is the
+    /// pixel size of the frame it analysed.
+    func uprightScores(of request: VNRequest, frameSize: CGSize, pass: Rotation) -> [Rotation: Double]
+}
+
+/// A detector that only recognises upright content. It is run on all four orientations, and the orientation in
+/// which it finds upright content gets the credit. Because every score is about the frame Vision analysed, the
+/// detector never needs to know which way a rotation's sign runs.
+protocol PerPassDetector: OrientationDetector {
     func uprightScore(of request: VNRequest, frameSize: CGSize) -> Double
 }
 
-/// Faces are the strongest cue: Vision's face detector finds faces at any in-plane angle and reports their roll,
-/// so only the pass in which a face's roll is near zero gets credit.
+extension PerPassDetector {
+    var runsOnce: Bool { false }
+
+    func uprightScores(of request: VNRequest, frameSize: CGSize, pass: Rotation) -> [Rotation: Double] {
+        [pass: uprightScore(of: request, frameSize: frameSize)]
+    }
+}
+
+/// Faces are the strongest cue. Vision's face detector finds faces at any in-plane angle and reports their roll,
+/// so one pass is enough: a face rolled by about +90° means the photo needs 90° clockwise, and so on.
 struct FaceDetector: OrientationDetector {
     let name = "faces"
     let weight = 1.0
+    let runsOnce = true
 
     func makeRequest() -> VNRequest {
         let request = VNDetectFaceRectanglesRequest()
@@ -29,20 +49,29 @@ struct FaceDetector: OrientationDetector {
         return request
     }
 
-    func uprightScore(of request: VNRequest, frameSize: CGSize) -> Double {
-        guard let faces = request.results as? [VNFaceObservation] else { return 0 }
-        return noisyOr(faces.compactMap { face -> Double? in
+    func uprightScores(of request: VNRequest, frameSize: CGSize, pass: Rotation) -> [Rotation: Double] {
+        guard let faces = request.results as? [VNFaceObservation] else { return [:] }
+        var votes: [Rotation: [Double]] = [:]
+        for face in faces {
             // Ignore specks: tiny "faces" in a thumbnail are mostly false positives.
-            guard face.boundingBox.width * face.boundingBox.height >= 0.0025 else { return nil }
-            // Without roll every pass would find the face equally, which the decider treats as a tie.
-            let upright = face.roll.map { uprightFactor(angleFromVertical: $0.doubleValue, toleranceDegrees: 30) } ?? 1
-            return Double(face.confidence) * upright
-        })
+            guard face.boundingBox.width * face.boundingBox.height >= 0.0025,
+                  let roll = face.roll?.doubleValue
+            else { continue }
+            // Roll is relative to the analysed frame, so add the correction already applied for this pass.
+            let degrees = roll * 180 / .pi + Double(pass.degrees)
+            let correction = Rotation(degrees: Int(degrees.rounded()))
+            // Faces tilted 30–45° from any quarter turn are ambiguous; they don't vote.
+            let tilt = (degrees - Double(correction.degrees)) * .pi / 180
+            let certainty = Double(face.confidence) * uprightFactor(angleFromVertical: tilt, toleranceDegrees: 30)
+            if certainty > 0 { votes[correction, default: []].append(certainty) }
+        }
+        return votes.mapValues { noisyOr($0) }
     }
 }
 
-/// People seen from behind or far away: credit the pass in which the neck is above the hips.
-struct BodyPoseDetector: OrientationDetector {
+/// People: credit the orientation in which the body points up — neck above hips, or for head-and-shoulders shots,
+/// nose above neck.
+struct BodyPoseDetector: PerPassDetector {
     let name = "body"
     let weight = 0.8
 
@@ -51,13 +80,11 @@ struct BodyPoseDetector: OrientationDetector {
     func uprightScore(of request: VNRequest, frameSize: CGSize) -> Double {
         guard let bodies = request.results as? [VNHumanBodyPoseObservation] else { return 0 }
         return noisyOr(bodies.compactMap { body -> Double? in
-            guard let top = joint(body, .neck) ?? joint(body, .nose),
-                  let bottom = joint(body, .root) ?? hipCenter(body)
-            else { return nil }
+            guard let (top, bottom) = axis(of: body) else { return nil }
             // Vision's normalised coordinates have their origin at the bottom left, y pointing up.
             let dx = Double(top.location.x - bottom.location.x) * frameSize.width
             let dy = Double(top.location.y - bottom.location.y) * frameSize.height
-            guard hypot(dx, dy) > 4 else { return nil }
+            guard hypot(dx, dy) > 0.03 * max(frameSize.width, frameSize.height) else { return nil }
             let angleFromUp = atan2(dx, dy)
             return min(top.confidence, bottom.confidence) * uprightFactor(angleFromVertical: angleFromUp, toleranceDegrees: 35)
         })
@@ -68,51 +95,84 @@ struct BodyPoseDetector: OrientationDetector {
         var confidence: Double
     }
 
+    /// The longest reliable head-to-toe direction available.
+    private func axis(of body: VNHumanBodyPoseObservation) -> (top: Joint, bottom: Joint)? {
+        if let top = joint(body, .neck) ?? joint(body, .nose),
+           let bottom = joint(body, .root) ?? center(joint(body, .leftHip), joint(body, .rightHip)) {
+            return (top, bottom)
+        }
+        if let top = joint(body, .nose) ?? center(joint(body, .leftEye), joint(body, .rightEye)),
+           let bottom = joint(body, .neck) ?? center(joint(body, .leftShoulder), joint(body, .rightShoulder)) {
+            return (top, bottom)
+        }
+        return nil
+    }
+
     private func joint(_ body: VNHumanBodyPoseObservation, _ name: VNHumanBodyPoseObservation.JointName) -> Joint? {
         guard let p = try? body.recognizedPoint(name), p.confidence > 0.3 else { return nil }
         return Joint(location: p.location, confidence: Double(p.confidence))
     }
 
-    private func hipCenter(_ body: VNHumanBodyPoseObservation) -> Joint? {
-        guard let l = joint(body, .leftHip), let r = joint(body, .rightHip) else { return nil }
+    private func center(_ a: Joint?, _ b: Joint?) -> Joint? {
+        guard let a, let b else { return nil }
         return Joint(
-            location: CGPoint(x: (l.location.x + r.location.x) / 2, y: (l.location.y + r.location.y) / 2),
-            confidence: min(l.confidence, r.confidence)
+            location: CGPoint(x: (a.location.x + b.location.x) / 2, y: (a.location.y + b.location.y) / 2),
+            confidence: min(a.confidence, b.confidence)
         )
     }
 }
 
-/// Signs, documents, screens: Vision's fast text recogniser reads upright text far more confidently than
-/// sideways or upside-down text.
-struct TextDetector: OrientationDetector {
+/// Signs, documents, screens. Vision reads sideways text not at all, and upside-down text as gibberish with the
+/// *same* confidence as real text, so the score counts recognised dictionary words, not Vision's confidence.
+struct TextDetector: PerPassDetector {
     let name = "text"
     let weight = 0.7
 
     func makeRequest() -> VNRequest {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .fast
+        // Correction would "fix" upside-down gibberish into words, hiding exactly the signal we need.
         request.usesLanguageCorrection = false
         return request
     }
 
     func uprightScore(of request: VNRequest, frameSize: CGSize) -> Double {
-        guard let lines = request.results as? [VNRecognizedTextObservation] else { return 0 }
-        var mass = 0.0
-        for line in lines {
-            guard let candidate = line.topCandidates(1).first, candidate.confidence >= 0.5 else { continue }
-            let readable = candidate.string.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }.count
-            guard readable >= 3 else { continue }
-            mass += Double(candidate.confidence) * min(Double(readable) / 8, 1)
-        }
-        // Saturates: ~3 confidently-read words is strong evidence.
-        return 1 - exp(-mass / 1.5)
+        guard let lines = request.results as? [VNRecognizedTextObservation], !lines.isEmpty else { return 0 }
+        let text = lines.compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ")
+        let (words, real) = Lexicon.count(in: text)
+        guard words > 0 else { return 0 }
+        // Mostly real words, and enough of them: ~3 real words is strong evidence.
+        return (Double(real) / Double(words)) * (1 - exp(-Double(real) / 2))
+    }
+}
+
+/// Dictionary lookups via the system spell checker, in the user's languages.
+enum Lexicon {
+    private static let lock = NSLock()
+
+    /// Words of 3+ characters, and how many of them are spelled correctly. Tokens mixing letters and digits
+    /// ("IS31", "OIOHd" style misreads) count as words but never as real ones.
+    static func count(in text: String) -> (words: Int, real: Int) {
+        let tokens = text.split { !$0.isLetter && !$0.isNumber }.filter { $0.count >= 3 && !$0.allSatisfy(\.isNumber) }
+        guard !tokens.isEmpty else { return (0, 0) }
+        // NSSpellChecker is not thread-safe; the text stage is rare enough that serialising it costs little.
+        lock.lock()
+        defer { lock.unlock() }
+        let checker = NSSpellChecker.shared
+        let real = tokens.filter { token in
+            guard token.allSatisfy(\.isLetter) else { return false }
+            // Lower-cased so all-caps gibberish isn't waved through as an acronym.
+            let word = token.lowercased()
+            return checker.checkSpelling(of: word, startingAt: 0).location == NSNotFound
+        }.count
+        return (tokens.count, real)
     }
 }
 
 /// Optional: any Core ML image classifier that has an "upright" class (labelled `0`, `0°`, `up` or `upright`).
 /// The score of a pass is the probability the model gives that class. This extends coverage to photos with no
 /// people or text (landscapes, objects), which the built-in Vision detectors cannot judge.
-struct CoreMLDetector: OrientationDetector, @unchecked Sendable {
+struct CoreMLDetector: PerPassDetector, @unchecked Sendable {
     let name = "model"
     let weight = 1.0
     let model: VNCoreMLModel

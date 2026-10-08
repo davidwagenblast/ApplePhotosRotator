@@ -86,7 +86,7 @@ public struct OrientationDecider: Sendable {
         // (one blurry face) can't produce a high confidence just because everything else scored zero.
         let confidence = min(max((bestScore - secondScore) / max(bestScore, 1), 0), 1)
 
-        if best == .none {
+        if best == Rotation.none {
             return OrientationDecision(status: .upright, rotation: .none, confidence: confidence, strength: bestScore)
         }
         let status: ScanStatus = confidence >= minimumConfidence ? .needsRotation : .inconclusive

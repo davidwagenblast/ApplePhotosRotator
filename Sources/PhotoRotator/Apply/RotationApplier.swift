@@ -135,7 +135,7 @@ struct RotationApplier {
     // MARK: Rendering
 
     private func prepareEdit(asset: PHAsset, item: Item) async throws -> PHContentEditingOutput {
-        guard item.rotation != .none else { throw ApplyError.noRotation }
+        guard item.rotation != Rotation.none else { throw ApplyError.noRotation }
         guard asset.canPerform(.content) else { throw ApplyError.notEditable }
         let current = (asset.modificationDate ?? asset.creationDate)?.timeIntervalSince1970 ?? 0
         guard abs(current - item.scannedModificationDate) < 1 else { throw ApplyError.changedSinceScan }
