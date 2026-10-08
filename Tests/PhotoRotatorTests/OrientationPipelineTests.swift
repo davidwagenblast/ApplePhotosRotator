@@ -17,6 +17,7 @@ final class OrientationPipelineTests: XCTestCase {
         settings.useFaces = false
         settings.useBodyPose = false
         settings.useText = true
+        settings.useScene = false
         return OrientationAnalyzer(settings: settings, model: nil)
     }
 

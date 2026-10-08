@@ -21,6 +21,7 @@ final class FacePhotoTests: XCTestCase {
         settings.useFaces = faces
         settings.useBodyPose = body
         settings.useText = false
+        settings.useScene = false
         return OrientationAnalyzer(settings: settings, model: nil)
     }
 
