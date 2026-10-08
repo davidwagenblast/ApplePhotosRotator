@@ -8,6 +8,7 @@ on:
       - 'Tools/TrainOrientationModel/**'
       - 'Sources/RotatorCore/OrientationClassifier.swift'
       - 'Sources/RotatorCore/OrientationTrainer.swift'
+      - 'Sources/RotatorCore/GridFeatures.swift'
       - 'Sources/RotatorVision/**'
       - '.github/workflows/train-scene-model.yml'
   workflow_dispatch:
@@ -54,8 +55,12 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: training-cache
-          key: features-${{ hashFiles('Sources/RotatorVision/**') }}-${{ env.PHOTO_COUNT }}-${{ github.run_id }}
-          restore-keys: features-${{ hashFiles('Sources/RotatorVision/**') }}-${{ env.PHOTO_COUNT }}-
+          key: features-${{ hashFiles('Sources/RotatorVision/SceneFeatures.swift') }}-${{ env.PHOTO_COUNT }}-${{ github.run_id }}
+          # The second key matches feature caches saved before the key covered only SceneFeatures.swift; the
+          # extraction code is unchanged since then.
+          restore-keys: |
+            features-${{ hashFiles('Sources/RotatorVision/SceneFeatures.swift') }}-${{ env.PHOTO_COUNT }}-
+            features-1d0a98e73cee09099269a242ad73afbd2721f032ec9a9c61f274e5319a8f5982-${{ env.PHOTO_COUNT }}-
 
       - name: Build trainer
         run: swift build -c release --product train-orientation-model
@@ -74,7 +79,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: training-cache
-          key: features-${{ hashFiles('Sources/RotatorVision/**') }}-${{ env.PHOTO_COUNT }}-${{ github.run_id }}
+          key: features-${{ hashFiles('Sources/RotatorVision/SceneFeatures.swift') }}-${{ env.PHOTO_COUNT }}-${{ github.run_id }}
 
       - name: Commit trained weights
         run: |

@@ -17,9 +17,9 @@ protocol OrientationDetector: Sendable {
     /// photo once per candidate correction.
     var runsOnce: Bool { get }
     func makeRequest() -> VNRequest
-    /// Scores keyed by correction. `pass` is the correction Vision applied before analysing, and `frameSize` is the
-    /// pixel size of the frame it analysed.
-    func uprightScores(of request: VNRequest, frameSize: CGSize, pass: Rotation) -> [Rotation: Double]
+    /// Scores keyed by correction. `pass` is the correction Vision applied before analysing, `image` is the photo
+    /// as displayed (before that correction), and `frameSize` is the pixel size of the frame Vision analysed.
+    func uprightScores(of request: VNRequest, image: CGImage, frameSize: CGSize, pass: Rotation) -> [Rotation: Double]
 }
 
 /// A detector that only recognises upright content. It is run on all four orientations, and the orientation in
@@ -32,7 +32,7 @@ protocol PerPassDetector: OrientationDetector {
 extension PerPassDetector {
     var runsOnce: Bool { false }
 
-    func uprightScores(of request: VNRequest, frameSize: CGSize, pass: Rotation) -> [Rotation: Double] {
+    func uprightScores(of request: VNRequest, image: CGImage, frameSize: CGSize, pass: Rotation) -> [Rotation: Double] {
         [pass: uprightScore(of: request, frameSize: frameSize)]
     }
 }
@@ -50,7 +50,7 @@ struct FaceDetector: OrientationDetector {
         return request
     }
 
-    func uprightScores(of request: VNRequest, frameSize: CGSize, pass: Rotation) -> [Rotation: Double] {
+    func uprightScores(of request: VNRequest, image: CGImage, frameSize: CGSize, pass: Rotation) -> [Rotation: Double] {
         guard let faces = request.results as? [VNFaceObservation] else { return [:] }
         var votes: [Rotation: [Double]] = [:]
         for face in faces {
@@ -206,24 +206,27 @@ struct CoreMLDetector: PerPassDetector, @unchecked Sendable {
 }
 
 /// Landscapes, buildings, objects — anything. A small classifier, trained on thousands of photos turned all four
-/// ways, reads Vision's feature print of the scene and estimates which correction it needs (sky above ground,
-/// trees and buildings pointing up, and so on). It runs on all four orientations and the four estimates are
-/// averaged, which cancels out direction biases in the model.
+/// ways, reads Vision's feature print (what the photo shows) together with a coarse colour-and-edge map (where things
+/// are: sky above ground, horizons, buildings and trees pointing up) and estimates which correction the photo needs.
+/// It runs on all four orientations and the four estimates are averaged, which cancels out direction biases.
 struct SceneDetector: OrientationDetector {
     let name = "scene"
     let weight = 0.9
     let runsOnce = false
     let classifier: OrientationClassifier
 
+    static let inputSize = SceneFeatures.dimension + GridFeatures.dimension
+
     /// The model built into the app, or `nil` if it has not been trained into this build.
     static let builtIn: OrientationClassifier? = Data(base64Encoded: SceneModelWeights.encoded)
         .flatMap { try? OrientationClassifier(data: $0) }
-        .flatMap { $0.inputSize == SceneFeatures.dimension ? $0 : nil }
+        .flatMap { $0.inputSize == inputSize ? $0 : nil }
 
     func makeRequest() -> VNRequest { SceneFeatures.makeRequest() }
 
-    func uprightScores(of request: VNRequest, frameSize: CGSize, pass: Rotation) -> [Rotation: Double] {
-        guard let features = SceneFeatures.vector(from: request) else { return [:] }
-        return OrientationClassifier.passScores(classifier.probabilities(features), pass: pass)
+    func uprightScores(of request: VNRequest, image: CGImage, frameSize: CGSize, pass: Rotation) -> [Rotation: Double] {
+        guard let featurePrint = SceneFeatures.vector(from: request), let grid = SceneGrid.rgb(of: image) else { return [:] }
+        let input = featurePrint + GridFeatures.features(grid, rotatedBy: pass)
+        return OrientationClassifier.passScores(classifier.probabilities(input), pass: pass)
     }
 }

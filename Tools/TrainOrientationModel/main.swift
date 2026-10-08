@@ -1,7 +1,7 @@
 // Trains the built-in scene orientation model.
 //
 //   train-orientation-model --images DIR --cache FILE --output FILE [--landscapes FILE]
-//                           [--hidden 128] [--epochs 30]
+//                           [--hidden N --decay X] [--epochs 30]
 //
 // Every photo in DIR is assumed to be upright. Each one is shown to Vision turned all four ways, so the labels come
 // for free. Photos are split by name into training (75%), validation (10%) and test (15%) sets; the test photos are
@@ -40,6 +40,17 @@ func log(_ message: String) {
 // needs 0, 1, 2 and 3 quarter turns clockwise. A record of all zeros marks a photo that could not be used.
 
 let dimension = SceneFeatures.dimension
+
+func loadThumbnail(_ name: String) -> CGImage? {
+    let url = URL(fileURLWithPath: imagesDir).appendingPathComponent(name)
+    let thumbnailOptions: [CFString: Any] = [
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceCreateThumbnailWithTransform: true,
+        kCGImageSourceThumbnailMaxPixelSize: 768,
+    ]
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+    return CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions as CFDictionary)
+}
 var features: [String: [[Float]]] = [:]
 
 if let data = FileManager.default.contents(atPath: cachePath) {
@@ -75,15 +86,7 @@ if !missing.isEmpty {
     DispatchQueue.concurrentPerform(iterations: missing.count) { index in
         let name = missing[index]
         let vectors: [[Float]] = autoreleasepool {
-            let url = URL(fileURLWithPath: imagesDir).appendingPathComponent(name)
-            let thumbnailOptions: [CFString: Any] = [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: 768,
-            ]
-            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-                  let image = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions as CFDictionary)
-            else { return [] }
+            guard let image = loadThumbnail(name) else { return [] }
             var result: [[Float]] = []
             for quarterTurns in 0..<4 {
                 // To make a frame that needs `c` clockwise, turn the upright photo by the inverse of `c`.
@@ -115,6 +118,31 @@ if !missing.isEmpty {
     try cacheHandle.close()
 }
 
+// MARK: Layout grids (cheap, so recomputed every run rather than cached)
+
+var grids: [String: [Float]] = [:]
+do {
+    let lock = NSLock()
+    let names = allNames.filter { features[$0] != nil }
+    DispatchQueue.concurrentPerform(iterations: names.count) { index in
+        let name = names[index]
+        let grid: [Float]? = autoreleasepool {
+            guard let image = loadThumbnail(name) else { return nil }
+            return SceneGrid.rgb(of: image)
+        }
+        lock.lock()
+        grids[name] = grid
+        lock.unlock()
+    }
+    log("Computed layout grids for \(grids.count) photos")
+}
+
+/// Model input for the photo turned so that it needs `quarterTurns` clockwise: feature print + layout features.
+func input(_ name: String, needing quarterTurns: Int) -> [Float] {
+    let needed = Rotation(degrees: 90 * quarterTurns)
+    return features[name]![quarterTurns] + GridFeatures.features(grids[name]!, rotatedBy: needed.inverse)
+}
+
 // MARK: Split
 
 /// FNV-1a, so a photo always lands in the same split however many photos there are.
@@ -124,25 +152,43 @@ func bucket(_ name: String) -> Int {
     return Int(hash % 100)
 }
 
-let usable = allNames.filter { name in features[name].map { !$0[0].allSatisfy { $0 == 0 } } ?? false }
+let usable = allNames.filter { name in
+    grids[name] != nil && (features[name].map { !$0[0].allSatisfy { $0 == 0 } } ?? false)
+}
 let testNames = usable.filter { bucket($0) < 15 }
 let validationNames = usable.filter { (15..<25).contains(bucket($0)) }
 let trainNames = usable.filter { bucket($0) >= 25 }
 log("Usable photos: \(usable.count) — train \(trainNames.count), validation \(validationNames.count), test \(testNames.count)")
 
 func samples(_ names: [String]) -> [LabeledFeatures] {
-    names.flatMap { name in (0..<4).map { LabeledFeatures(features: features[name]![$0], label: $0) } }
+    names.flatMap { name in (0..<4).map { LabeledFeatures(features: input(name, needing: $0), label: $0) } }
 }
 
 // MARK: Train
 
+// Several sizes and regularisation strengths; the one with the best validation accuracy is kept.
+let trainingSet = samples(trainNames), validationSet = samples(validationNames)
+var configurations: [(hidden: Int, decay: Float)] = [(0, 1e-3), (128, 1e-2), (256, 5e-2)]
+if let hidden = options["hidden"].flatMap(Int.init) { configurations = [(hidden, Float(options["decay"] ?? "") ?? 1e-2)] }
 var trainer = OrientationTrainer()
-trainer.hiddenSize = Int(options["hidden"] ?? "") ?? 128
 trainer.epochs = Int(options["epochs"] ?? "") ?? 30
-log("Training: hidden \(trainer.hiddenSize), epochs \(trainer.epochs)")
-let trainingStarted = Date()
-let model = trainer.train(samples(trainNames), validation: samples(validationNames), log: log)
-log(String(format: "Training took %.0f s", Date().timeIntervalSince(trainingStarted)))
+var model: OrientationClassifier!
+var bestValidation = -1.0
+for configuration in configurations {
+    var candidateTrainer = trainer
+    candidateTrainer.hiddenSize = configuration.hidden
+    candidateTrainer.weightDecay = configuration.decay
+    log("Training: hidden \(configuration.hidden), weight decay \(configuration.decay), epochs \(trainer.epochs)")
+    let started = Date()
+    let candidate = candidateTrainer.train(trainingSet, validation: validationSet) { _ in }
+    let accuracy = candidate.accuracy(on: validationSet)
+    log(String(format: "  → validation accuracy %.2f%% (%.0f s)", 100 * accuracy, Date().timeIntervalSince(started)))
+    if accuracy > bestValidation {
+        bestValidation = accuracy
+        model = candidate
+        trainer = candidateTrainer
+    }
+}
 
 // MARK: Evaluate on the held-out test photos, through the app's decision logic
 
@@ -166,12 +212,11 @@ var everything = Tally(thresholds: thresholds.count)
 var landscapes = Tally(thresholds: thresholds.count)
 
 for name in testNames {
-    let turned = features[name]!
     for truthTurns in 0..<4 {
         // The photo as it sits in the library needs `truth`; in pass r Vision turns it by r, so it then needs truth - r.
         var scores: [Rotation: Double] = [:]
         for pass in 0..<4 {
-            let p = model.probabilities(turned[(truthTurns - pass + 4) % 4])
+            let p = model.probabilities(input(name, needing: (truthTurns - pass + 4) % 4))
             scores.merge(OrientationClassifier.passScores(p, pass: Rotation(degrees: 90 * pass))) { $0 + $1 }
         }
         let decision = decider.decide([DetectorEvidence(detector: "scene", weight: 0.9, uprightScores: scores)])
@@ -213,7 +258,7 @@ func report(_ title: String, _ tally: Tally) -> String {
 
 let testAccuracy = model.accuracy(on: samples(testNames))
 let summary = """
-Scene orientation model: Vision feature print revision 2 → \(trainer.hiddenSize > 0 ? "\(trainer.hiddenSize)-unit hidden layer" : "linear") → 4 classes.
+Scene orientation model: Vision feature print revision 2 + 8×8 colour and edge layout → \(trainer.hiddenSize > 0 ? "\(trainer.hiddenSize)-unit hidden layer" : "linear") (weight decay \(trainer.weightDecay)) → 4 classes.
 Trained on \(trainNames.count) photos (×4 rotations); validated on \(validationNames.count); tested on \(testNames.count) held-out photos.
 Single-pass test accuracy: \(String(format: "%.1f%%", 100 * testAccuracy)).
 

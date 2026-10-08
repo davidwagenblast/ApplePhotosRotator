@@ -68,7 +68,7 @@ struct OrientationAnalyzer: Sendable {
             let handler = VNImageRequestHandler(cgImage: image, orientation: pass.cgOrientation, options: [:])
             try handler.perform(requests)
             for (request, i) in zip(requests, active) {
-                scores[i].merge(detectors[i].uprightScores(of: request, frameSize: size, pass: pass)) { $0 + $1 }
+                scores[i].merge(detectors[i].uprightScores(of: request, image: image, frameSize: size, pass: pass)) { $0 + $1 }
             }
         }
         return detectors.enumerated().map { i, d in

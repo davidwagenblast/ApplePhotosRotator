@@ -16,7 +16,8 @@ final class OrientationClassifierTests: XCTestCase {
         for hidden in [0, 16] {
             var trainer = OrientationTrainer()
             trainer.hiddenSize = hidden
-            trainer.epochs = 15
+            trainer.epochs = 30
+            trainer.learningRate = 0.01
             let model = trainer.train(clusters(count: 800, seed: 1), validation: clusters(count: 200, seed: 2))
             XCTAssertGreaterThan(model.accuracy(on: clusters(count: 400, seed: 3)), 0.95, "hidden=\(hidden)")
         }
