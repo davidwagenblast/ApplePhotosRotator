@@ -1,0 +1,22 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift version
+        run: swift --version
+      - name: Unit tests
+        run: swift test
+      - name: Build app bundle
+        run: scripts/build_app.sh
+      - name: Verify bundle
+        run: |
+          plutil -lint "build/Photo Rotator.app/Contents/Info.plist"
+          codesign --verify --verbose "build/Photo Rotator.app"
