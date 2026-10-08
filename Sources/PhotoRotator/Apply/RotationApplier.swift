@@ -115,7 +115,7 @@ struct RotationApplier {
         }
 
         let failed = Set(failures.map(\.localIdentifier))
-        let committed = prepared.map(\.asset.localIdentifier).filter { !failed.contains($0) }
+        let committed = prepared.map { $0.asset.localIdentifier }.filter { !failed.contains($0) }
         let refreshed = PhotoLibrary.assets(withLocalIdentifiers: committed)
         for id in committed {
             try? await store.markApplied(id, newModificationDate: refreshed[id]?.modificationDate?.timeIntervalSince1970)

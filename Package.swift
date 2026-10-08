@@ -18,5 +18,7 @@ let package = Package(
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         .testTarget(name: "RotatorCoreTests", dependencies: ["RotatorCore"]),
+        // Runs the real Vision pipeline on synthetic images (macOS only).
+        .testTarget(name: "PhotoRotatorTests", dependencies: ["PhotoRotator", "RotatorCore"]),
     ]
 )
