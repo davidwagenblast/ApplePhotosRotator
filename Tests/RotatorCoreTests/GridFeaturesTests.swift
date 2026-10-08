@@ -44,7 +44,7 @@ final class GridFeaturesTests: XCTestCase {
         let horizonCell = (3 * GridFeatures.cells + 0) * 5
         XCTAssertGreaterThan(upright[horizonCell + 3], upright[horizonCell + 4])
         let sideways = GridFeatures.features(grid, rotatedBy: .clockwise90)
-        let sidewaysHorizonCell = (0 * GridFeatures.cells + 4) * 5
+        let sidewaysHorizonCell = (0 * GridFeatures.cells + 3) * 5
         XCTAssertGreaterThan(sideways[sidewaysHorizonCell + 4], sideways[sidewaysHorizonCell + 3])
     }
 }
