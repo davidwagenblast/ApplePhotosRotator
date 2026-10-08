@@ -77,20 +77,25 @@ editing extensions use, so Photos updates its own database.
 ## How detection works
 
 The app has no "is this upright?" model built in, so it uses cues that macOS's Vision framework can measure
-reliably. Each photo's small thumbnail is checked in all four orientations: as-is, 90°, 180°, and 270°. The app
-records how upright the content looks in each one.
+reliably. Each photo is checked as a small thumbnail.
 
-| Cue | What counts as upright | Weight |
+| Cue | How it decides | Weight |
 | --- | --- | --- |
-| **Faces** | A face whose tilt is within 30° of level. Vision finds faces at any angle and reports their tilt, so only one orientation gets credit. | 1.0 |
-| **People (body pose)** | The neck is above the hips. | 0.8 |
-| **Text** | Vision reads the text confidently. Its fast text reader handles upright text much better than sideways or upside-down text. | 0.7 |
-| **Core ML model** (optional) | The model's probability for its "upright" class. | 1.0 |
+| **Faces** | Vision finds faces at any angle and reports how far each is tilted. A face tilted about 90° means the photo needs a quarter turn; this needs only one Vision pass per photo. Faces tilted 30–45° from a quarter turn are ignored as ambiguous. | 1.0 |
+| **People (body pose)** | Checked in all four orientations. The orientation where the neck is above the hips gets the credit (for head-and-shoulders shots, the nose above the neck). | 0.8 |
+| **Text** | Checked in all four orientations. Vision can't read sideways text, and it reads upside-down text as gibberish, so the orientation with the most real dictionary words gets the credit. Vision's own confidence score is ignored because it's the same for gibberish and real text. | 0.7 |
+| **Core ML model** (optional) | Checked in all four orientations. The model's probability for its "upright" class. | 1.0 |
 
 The scores are combined, and the orientation with the highest score wins. Confidence is how far the winner beats
-the runner-up. A photo is only proposed if its best orientation isn't the current one and the cues agree
-clearly. Photos that already look upright are skipped. Faces and body pose run first; text, then the model, only
-run if the earlier cues are unsure. This keeps large scans fast.
+the runner-up. A photo is only proposed if the winning orientation isn't the current one and the cues agree
+clearly. Photos that already look upright are skipped. The cues run in order (faces, body, text, model), and
+the app stops as soon as one gives a confident answer, so most photos with faces need just one Vision request.
+
+**What's been checked automatically (CI on a Mac):** a real photo of a person and a page of text are each turned to
+all four orientations. Every time, the app proposes the right fix, and applying that fix makes the image upright
+again. Body pose alone also gets the direction right on the portrait, but at a low 35% confidence, below the
+review screen's default 50% cutoff. These tests don't cover real-world variety: group photos, small faces,
+handwriting, and non-Latin text haven't been tested.
 
 **Limitation:** photos with no faces, people, or readable text (landscapes, food, pets, objects) usually can't be
 judged by these cues. They're counted as **Not enough to judge** and left alone. Nothing is ever changed without
@@ -133,4 +138,11 @@ Support/                     Info.plist and entitlements for the app bundle
 scripts/build_app.sh         Builds and signs the .app
 ```
 
-Run the unit tests with `swift test`.
+Run the tests with `swift test`. The face tests need an upright photo of a person; point `FACE_IMAGE` at one:
+
+```sh
+FACE_IMAGE=~/Pictures/someone.jpg swift test
+```
+
+The GitHub Actions workflow (`.github/workflows/build.yml`) runs the tests and builds the app on a macOS runner
+on every push.
