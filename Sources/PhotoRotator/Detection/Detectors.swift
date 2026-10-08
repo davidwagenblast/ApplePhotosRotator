@@ -153,7 +153,8 @@ enum Lexicon {
     /// Words of 3+ characters, and how many of them are spelled correctly. Tokens mixing letters and digits
     /// ("IS31", "OIOHd" style misreads) count as words but never as real ones.
     static func count(in text: String) -> (words: Int, real: Int) {
-        let tokens = text.split { !$0.isLetter && !$0.isNumber }.filter { $0.count >= 3 && !$0.allSatisfy(\.isNumber) }
+        let tokens = text.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+            .filter { $0.count >= 3 && !$0.allSatisfy(\.isNumber) }
         guard !tokens.isEmpty else { return (0, 0) }
         // NSSpellChecker is not thread-safe; the text stage is rare enough that serialising it costs little.
         lock.lock()
