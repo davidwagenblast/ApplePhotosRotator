@@ -5,6 +5,7 @@ struct ScanView: View {
     @Environment(AppModel.self) private var model
     @State private var confirmReset = false
     @State private var choosingModel = false
+    @State private var confirmUndo = false
 
     var body: some View {
         @Bindable var model = model
@@ -35,8 +36,18 @@ struct ScanView: View {
                         .buttonStyle(.borderedProminent)
                         .disabled(model.reviewItems.isEmpty)
                     Spacer()
+                    if model.counts.applied > 0 {
+                        Button("Undo All Rotations…") { confirmUndo = true }
+                            .disabled(model.isUndoing || model.isApplying)
+                    }
                     Button("Forget All Results…", role: .destructive) { confirmReset = true }
                         .disabled(model.isScanning)
+                }
+                if model.isUndoing {
+                    HStack { ProgressView().controlSize(.small); Text("Returning photos to their originals…") }
+                }
+                if let message = model.undoMessage {
+                    Text(message).foregroundStyle(.secondary)
                 }
             }
 
@@ -46,14 +57,17 @@ struct ScanView: View {
                 Toggle("Text", isOn: $model.settings.useText)
                 Toggle(isOn: $model.settings.useScene) {
                     Text("Landscapes, buildings and other scenes")
-                    Text(OrientationNetDetector.isAvailable
-                        ? "Built-in orientation network, trained to tell which way any photo is turned."
-                        : SceneDetector.builtIn != nil
-                            ? "Built-in scene model: sky above ground, buildings and trees pointing up."
-                            : "No scene model is included in this build.")
+                    Text(sceneStatus)
                 }
                 .disabled(!OrientationNetDetector.isAvailable && SceneDetector.builtIn == nil)
-                LabeledContent("Core ML orientation model") {
+            } header: {
+                Text("What to look for")
+            } footer: {
+                Text("Faces are the most reliable cue. The scene model covers photos without people or text, but some photos — close-ups, textures, shots taken straight down — have no clear up, and those are left alone as \"not enough to judge\".")
+            }
+
+            Section {
+                LabeledContent("Extra Core ML model") {
                     HStack {
                         Text(model.settings.modelPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "None")
                             .foregroundStyle(.secondary)
@@ -64,9 +78,9 @@ struct ScanView: View {
                     }
                 }
             } header: {
-                Text("What to look for")
+                Text("Advanced")
             } footer: {
-                Text("Faces are the most reliable cue. The scene model covers photos without people or text, but some photos — close-ups, textures, shots taken straight down — have no clear up, and those are left alone as \"not enough to judge\".")
+                Text("Not needed: the orientation network above is built in. This is only for adding your own Core ML orientation classifier on top of it.")
             }
 
             Section("Speed") {
@@ -89,6 +103,13 @@ struct ScanView: View {
             }
         }
         .formStyle(.grouped)
+        .confirmationDialog("Undo all rotations made by Photo Rotator?", isPresented: $confirmUndo) {
+            Button("Revert \(model.counts.applied.formatted()) Photos to Original", role: .destructive) {
+                Task { await model.undoAllRotations() }
+            }
+        } message: {
+            Text("Each photo this app rotated goes back to its original, as with Image › Revert to Original in Photos. That also removes any other edits on those photos, such as crops or filters, whether made before or after the rotation.")
+        }
         .confirmationDialog("Forget all scan results?", isPresented: $confirmReset) {
             Button("Forget Results", role: .destructive) { Task { await model.resetResults() } }
         } message: {
@@ -97,6 +118,21 @@ struct ScanView: View {
         .fileImporter(isPresented: $choosingModel, allowedContentTypes: [.item, .folder]) { result in
             if case .success(let url) = result { model.settings.modelPath = url.path }
         }
+    }
+
+    private var sceneStatus: String {
+        if OrientationNetDetector.isAvailable {
+            switch model.networkReady {
+            case true?: return "Built-in orientation network: ready."
+            case false?: return SceneDetector.builtIn != nil
+                ? "The built-in orientation network couldn't be loaded, so the lighter scene model is used. Try reinstalling."
+                : "The built-in orientation network couldn't be loaded. Try reinstalling."
+            case nil: return "Built-in orientation network: loading…"
+            }
+        }
+        return SceneDetector.builtIn != nil
+            ? "Built-in scene model (this build doesn't include the orientation network)."
+            : "No scene model is included in this build."
     }
 
     @ViewBuilder private var scanControls: some View {

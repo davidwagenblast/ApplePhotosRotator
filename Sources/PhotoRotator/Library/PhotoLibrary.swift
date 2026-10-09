@@ -37,8 +37,8 @@ enum PhotoLibrary {
 
     /// A small, display-oriented image for analysis. **Blocking** — call it from a background thread only.
     ///
-    /// The image is what Photos shows (current edits and EXIF orientation applied), which is exactly what the user
-    /// judges as "sideways", so proposals are relative to what they see.
+    /// The image is what Photos shows (current edits and orientation applied), which is exactly what the user judges
+    /// as "sideways", so proposals are relative to what they see.
     static func analysisImage(for asset: PHAsset, longEdge: Int, allowNetwork: Bool) -> CGImage? {
         let size = CGSize(width: longEdge, height: longEdge)
         for mode in [PHImageRequestOptionsDeliveryMode.highQualityFormat, .fastFormat] {
@@ -50,11 +50,35 @@ enum PhotoLibrary {
             options.isNetworkAccessAllowed = allowNetwork
             var result: CGImage?
             PHImageManager.default().requestImage(for: asset, targetSize: size, contentMode: .aspectFit, options: options) { image, _ in
-                result = image?.cgImage(forProposedRect: nil, context: nil, hints: nil)
+                result = image.flatMap { displayedPixels(of: $0, maxLongEdge: longEdge) }
             }
             if let result, result.width >= 64, result.height >= 64 { return result }
         }
         return nil
+    }
+
+    /// The image as it appears on screen, as an upright bitmap.
+    ///
+    /// Don't use `NSImage.cgImage(forProposedRect:context:hints:)` for this: it can hand back the stored pixels
+    /// without the orientation that the image shows them with (a portrait iPhone photo is stored sideways, with a
+    /// tag saying to turn it), so every such photo would be analysed sideways. Drawing applies whatever the image
+    /// applies on screen.
+    static func displayedPixels(of image: NSImage, maxLongEdge: Int) -> CGImage? {
+        let displayed = image.size
+        guard displayed.width > 0, displayed.height > 0 else { return nil }
+        let scale = min(1, CGFloat(maxLongEdge) / max(displayed.width, displayed.height))
+        let width = max(1, Int((displayed.width * scale).rounded()))
+        let height = max(1, Int((displayed.height * scale).rounded()))
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        context.interpolationQuality = .high
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+        image.draw(in: NSRect(x: 0, y: 0, width: width, height: height), from: .zero, operation: .copy, fraction: 1)
+        NSGraphicsContext.restoreGraphicsState()
+        return context.makeImage()
     }
 }
 

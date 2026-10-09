@@ -1,4 +1,6 @@
+import AppKit
 import ImageIO
+import UniformTypeIdentifiers
 import RotatorVision
 import XCTest
 @testable import PhotoRotator
@@ -73,5 +75,28 @@ final class FacePhotoTests: XCTestCase {
                 XCTAssertEqual(result.decision.rotation, expected, result.summary)
             }
         }
+    }
+
+    /// A photo stored sideways with an orientation tag, as iPhones save portrait photos, must be analysed the way it
+    /// is displayed. The app gets photos from PhotoKit as `NSImage`s.
+    func testTaggedPhotoIsAnalysedAsDisplayed() throws {
+        let upright = try uprightPhoto()
+        // Stored turned a quarter turn counter-clockwise; EXIF orientation 6 says "turn 90° clockwise to display".
+        let stored = OrientationPipelineTests.turnedCounterClockwise(upright, quarterTurns: 1)
+        let data = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(data, UTType.jpeg.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, stored, [kCGImagePropertyOrientation: 6] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        let image = try XCTUnwrap(NSImage(data: data as Data))
+
+        let analyzer = analyzer(faces: true, body: false)
+        if let shortcut = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            let result = try analyzer.analyze(shortcut)
+            print("NSImage.cgImage shortcut → \(result.decision.rotation) \(result.decision.status) [\(result.summary)]")
+        }
+        let drawn = try XCTUnwrap(PhotoLibrary.displayedPixels(of: image, maxLongEdge: 768))
+        let result = try analyzer.analyze(drawn)
+        print("drawn as displayed → \(result.decision.rotation) \(result.decision.status) [\(result.summary)]")
+        XCTAssertEqual(result.decision.status, .upright, result.summary)
     }
 }

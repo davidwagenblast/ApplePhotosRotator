@@ -49,6 +49,13 @@ final class AppModel {
     var lastAppliedCount = 0
     private var applyTask: Task<Void, Never>?
 
+    /// Whether the built-in orientation network loaded; `nil` until checked.
+    var networkReady: Bool?
+
+    // MARK: Undo state
+    var isUndoing = false
+    var undoMessage: String?
+
     private var store: ResultStore?
 
     init() {
@@ -73,6 +80,10 @@ final class AppModel {
     }
 
     func onAuthorized() async {
+        if networkReady == nil {
+            // Loading may compile the model the first time, so keep it off the main thread.
+            networkReady = await Task.detached(priority: .userInitiated) { OrientationNetDetector.builtIn != nil }.value
+        }
         libraryCount = PhotoLibrary.fetchAllPhotos().count
         await refreshCounts()
         await loadReview()
@@ -224,6 +235,53 @@ final class AppModel {
             await refreshCounts()
             isApplying = false
         }
+    }
+
+    /// Returns every photo this app has rotated to its original, using Photos' Revert to Original, and forgets their
+    /// scan results so the next scan checks them again.
+    func undoAllRotations() async {
+        guard let store, !isUndoing, !isApplying else { return }
+        isUndoing = true
+        defer { isUndoing = false }
+        do {
+            let ids = try await store.appliedIdentifiers()
+            let assets = await Task.detached(priority: .userInitiated) {
+                PhotoLibrary.assets(withLocalIdentifiers: ids)
+            }.value
+            var reverted: [String] = []
+            var failed = 0
+            let editable = ids.compactMap { assets[$0] }.filter { $0.canPerform(.content) }
+            for start in stride(from: 0, to: editable.count, by: 50) {
+                let batch = Array(editable[start..<min(start + 50, editable.count)])
+                do {
+                    try await PHPhotoLibrary.shared().performChanges {
+                        for asset in batch { PHAssetChangeRequest(for: asset).revertAssetContentToOriginal() }
+                    }
+                    reverted += batch.map(\.localIdentifier)
+                } catch {
+                    // Retry one by one so a single problem photo doesn't block the rest.
+                    for asset in batch {
+                        do {
+                            try await PHPhotoLibrary.shared().performChanges {
+                                PHAssetChangeRequest(for: asset).revertAssetContentToOriginal()
+                            }
+                            reverted.append(asset.localIdentifier)
+                        } catch {
+                            failed += 1
+                        }
+                    }
+                }
+            }
+            // Photos that no longer exist have nothing to undo.
+            let missing = ids.filter { assets[$0] == nil }
+            try await store.forget(reverted + missing)
+            undoMessage = failed == 0
+                ? "Returned \(reverted.count.formatted()) photos to their originals."
+                : "Returned \(reverted.count.formatted()) photos to their originals. \(failed.formatted()) could not be reverted; use Image › Revert to Original in Photos for those."
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        await refreshCounts()
     }
 
     func cancelApply() {

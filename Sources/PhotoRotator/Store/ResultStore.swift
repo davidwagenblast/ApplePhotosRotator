@@ -67,7 +67,27 @@ actor ResultStore {
             );
             CREATE INDEX IF NOT EXISTS results_status ON results(status, applied_at);
             """)
+
+        // Results from an older analyzer are discarded so those photos are scanned again. Records of rotations that
+        // were applied are kept: they're what "Undo All" works from.
+        var statement: OpaquePointer?
+        var storedVersion: Int32 = 0
+        if sqlite3_prepare_v2(handle, "PRAGMA user_version", -1, &statement, nil) == SQLITE_OK,
+           sqlite3_step(statement) == SQLITE_ROW {
+            storedVersion = sqlite3_column_int(statement, 0)
+        }
+        sqlite3_finalize(statement)
+        if storedVersion < Self.analysisVersion {
+            try Self.exec(handle, """
+                DELETE FROM results WHERE applied_at IS NULL;
+                PRAGMA user_version = \(Self.analysisVersion);
+                """)
+        }
     }
+
+    /// Bump whenever a change to analysis makes earlier results untrustworthy.
+    /// 2: photos are analysed as displayed (version 1 could analyse photos stored with an orientation tag sideways).
+    static let analysisVersion: Int32 = 2
 
     deinit { sqlite3_close(db) }
 
@@ -136,7 +156,27 @@ actor ResultStore {
     }
 
     func reset() throws {
-        try Self.exec(db, "DELETE FROM results")
+        try Self.exec(db, "DELETE FROM results WHERE applied_at IS NULL")
+    }
+
+    /// Forgets these photos entirely, so the next scan checks them again.
+    func forget(_ localIdentifiers: [String]) throws {
+        let statement = try prepare("DELETE FROM results WHERE local_id = ?")
+        defer { sqlite3_finalize(statement) }
+        for id in localIdentifiers {
+            sqlite3_reset(statement)
+            sqlite3_bind_text(statement, 1, id, -1, Self.transient)
+            try step(statement)
+        }
+    }
+
+    /// Photos this app has rotated.
+    func appliedIdentifiers() throws -> [String] {
+        let statement = try prepare("SELECT local_id FROM results WHERE applied_at IS NOT NULL")
+        defer { sqlite3_finalize(statement) }
+        var ids: [String] = []
+        while sqlite3_step(statement) == SQLITE_ROW { ids.append(String(cString: sqlite3_column_text(statement, 0))) }
+        return ids
     }
 
     // MARK: Reading
