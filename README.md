@@ -8,21 +8,32 @@ non-destructive editing system.
 ## Requirements
 
 - macOS 14 Sonoma or later
-- Xcode 15+ or the Xcode Command Line Tools (Swift 5.9+) to build
+- Apple's free Command Line Tools (or Xcode 15+). If they're missing, the installer opens Apple's installer for you;
+  run the installer again when that finishes.
 
-## Build and run
+## Install (one step)
+
+Paste this into Terminal:
 
 ```sh
-scripts/build_app.sh
-open "build/Photo Rotator.app"
+curl -fsSL https://raw.githubusercontent.com/davidwagenblast/ApplePhotosRotator/main/install.sh | bash
 ```
 
-On first launch, macOS asks for access to your Photos library. Choose **Allow Full Access**.
+It downloads the code, builds the app, puts **Photo Rotator** in your Applications folder and opens it. The first
+build takes a few minutes. Run the same command again any time to update.
 
-> Run the app from the `.app` bundle, not with `swift run`. macOS only allows Photos access for a real app bundle
-> that declares why it needs access.
+If you already have a copy of this repository, run `./install.sh` in it, or double-click
+**Install Photo Rotator.command** in Finder. (If Finder says it can't open the file because it was downloaded,
+Control-click it, choose **Open**, then **Open** again.)
 
-To work on the code in Xcode, open `Package.swift`. To run it, still use `scripts/build_app.sh`.
+On first launch, macOS asks for access to your Photos library. Choose **Allow Full Access**. Because the app is
+built on your Mac rather than downloaded, macOS may ask again after an update.
+
+### For development
+
+`scripts/build_app.sh` builds `build/Photo Rotator.app` without installing it. To work on the code in Xcode, open
+`Package.swift`, but run the app from the `.app` bundle, not with `swift run`: macOS only allows Photos access for
+a real app bundle that declares why it needs access.
 
 ## How to use it
 

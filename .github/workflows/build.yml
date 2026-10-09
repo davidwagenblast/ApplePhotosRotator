@@ -19,9 +19,22 @@ jobs:
         env:
           FACE_IMAGE: ${{ runner.temp }}/astronaut.png
         run: swift test 2>&1 | tee test.log; exit ${PIPESTATUS[0]}
-      - name: Build app bundle
-        run: scripts/build_app.sh
-      - name: Verify bundle
+      - name: One-step install from this copy of the code
+        env:
+          INSTALL_DIR: ${{ runner.temp }}/Applications
+        run: ./install.sh --no-open
+      - name: Verify the installed app
         run: |
-          plutil -lint "build/Photo Rotator.app/Contents/Info.plist"
-          codesign --verify --verbose "build/Photo Rotator.app"
+          APP="$RUNNER_TEMP/Applications/Photo Rotator.app"
+          plutil -lint "$APP/Contents/Info.plist"
+          codesign --verify --verbose "$APP"
+          ls "$APP/Contents/Resources" | grep -q '^OrientationNet\.mlmodelc$'
+      - name: One-step install piped from curl (no copy of the code)
+        # Same as `curl … | bash`, but downloading this commit instead of main.
+        env:
+          INSTALL_DIR: ${{ runner.temp }}/Applications-piped
+          PHOTO_ROTATOR_REPO: file://${{ github.workspace }}
+          PHOTO_ROTATOR_SOURCE: ${{ runner.temp }}/source
+        run: |
+          bash -s -- --no-open < install.sh
+          codesign --verify --verbose "$RUNNER_TEMP/Applications-piped/Photo Rotator.app"
