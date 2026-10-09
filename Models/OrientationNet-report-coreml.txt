@@ -1,18 +1,110 @@
 Core ML model, run through Vision as in the app, on 1777 held-out photos.
 Single-pass accuracy: 82.1%.
 
-All test photos: 1777 upright and 5331 rotated test cases
-  min confidence | rotated: found correctly | rotated: wrong direction | upright: wrongly proposed
-             30% |                    75.9% |                     4.0% |                      6.0%
-             50% |                    71.6% |                     2.0% |                      3.0%
-             60% |                    69.5% |                     1.5% |                      2.2%
-             70% |                    66.6% |                     0.9% |                      1.4%
-             80% |                    62.9% |                     0.5% |                      0.8%
+### As trained: all four turns equally likely
+All test photos: 1777 upright, 3554 sideways and 1777 upside-down test cases
+  min confidence | sideways found | upside-down found | wrong direction | upright wrongly flagged
+             30% |          75.9% |             75.9% |            4.0% |                    6.0%
+             50% |          71.6% |             71.6% |            2.0% |                    3.0%
+             60% |          69.5% |             69.5% |            1.5% |                    2.2%
+             70% |          66.6% |             66.6% |            0.9% |                    1.4%
+             80% |          62.9% |             62.9% |            0.5% |                    0.8%
+             90% |          56.4% |             56.4% |            0.2% |                    0.2%
+Landscape test photos (710 photos): 710 upright, 1420 sideways and 710 upside-down test cases
+  min confidence | sideways found | upside-down found | wrong direction | upright wrongly flagged
+             30% |          87.7% |             87.7% |            1.6% |                    2.4%
+             50% |          86.3% |             86.3% |            0.9% |                    1.4%
+             60% |          85.2% |             85.2% |            0.8% |                    1.1%
+             70% |          83.8% |             83.8% |            0.5% |                    0.7%
+             80% |          81.7% |             81.7% |            0.3% |                    0.4%
+             90% |          75.6% |             75.6% |            0.2% |                    0.3%
 
-Landscape test photos (710 photos): 710 upright and 2130 rotated test cases
-  min confidence | rotated: found correctly | rotated: wrong direction | upright: wrongly proposed
-             30% |                    87.7% |                     1.6% |                      2.4%
-             50% |                    86.3% |                     0.9% |                      1.4%
-             60% |                    85.2% |                     0.8% |                      1.1%
-             70% |                    83.8% |                     0.5% |                      0.7%
-             80% |                    81.7% |                     0.3% |                      0.4%
+### As trained, and all four passes must agree
+All test photos: 1777 upright, 3554 sideways and 1777 upside-down test cases
+  min confidence | sideways found | upside-down found | wrong direction | upright wrongly flagged
+             30% |          72.3% |             72.3% |            3.0% |                    4.5%
+             50% |          70.8% |             70.8% |            1.8% |                    2.8%
+             60% |          69.4% |             69.4% |            1.4% |                    2.1%
+             70% |          66.6% |             66.6% |            0.9% |                    1.4%
+             80% |          62.9% |             62.9% |            0.5% |                    0.8%
+             90% |          56.4% |             56.4% |            0.2% |                    0.2%
+Landscape test photos (710 photos): 710 upright, 1420 sideways and 710 upside-down test cases
+  min confidence | sideways found | upside-down found | wrong direction | upright wrongly flagged
+             30% |          86.1% |             86.1% |            1.5% |                    2.3%
+             50% |          85.8% |             85.8% |            0.9% |                    1.4%
+             60% |          85.2% |             85.2% |            0.8% |                    1.1%
+             70% |          83.8% |             83.8% |            0.5% |                    0.7%
+             80% |          81.7% |             81.7% |            0.3% |                    0.4%
+             90% |          75.6% |             75.6% |            0.2% |                    0.3%
+
+### Prior: 90% upright, 4.5% each sideways, 1% upside down
+All test photos: 1777 upright, 3554 sideways and 1777 upside-down test cases
+  min confidence | sideways found | upside-down found | wrong direction | upright wrongly flagged
+             30% |          60.4% |              0.3% |            0.6% |                    0.2%
+             50% |          51.0% |              0.0% |            0.2% |                    0.0%
+             60% |          28.3% |              0.0% |            0.1% |                    0.0%
+             70% |           3.9% |              0.0% |            0.0% |                    0.0%
+             80% |           0.2% |              0.0% |            0.0% |                    0.0%
+             90% |           0.0% |              0.0% |            0.0% |                    0.0%
+Landscape test photos (710 photos): 710 upright, 1420 sideways and 710 upside-down test cases
+  min confidence | sideways found | upside-down found | wrong direction | upright wrongly flagged
+             30% |          79.3% |              0.1% |            0.3% |                    0.1%
+             50% |          69.9% |              0.0% |            0.0% |                    0.0%
+             60% |          38.6% |              0.0% |            0.0% |                    0.0%
+             70% |           3.9% |              0.0% |            0.0% |                    0.0%
+             80% |           0.0% |              0.0% |            0.0% |                    0.0%
+             90% |           0.0% |              0.0% |            0.0% |                    0.0%
+
+### Prior: 97% upright, 1.35% each sideways, 0.3% upside down
+All test photos: 1777 upright, 3554 sideways and 1777 upside-down test cases
+  min confidence | sideways found | upside-down found | wrong direction | upright wrongly flagged
+             30% |           1.6% |              0.0% |            0.0% |                    0.0%
+             50% |           0.0% |              0.0% |            0.0% |                    0.0%
+             60% |           0.0% |              0.0% |            0.0% |                    0.0%
+             70% |           0.0% |              0.0% |            0.0% |                    0.0%
+             80% |           0.0% |              0.0% |            0.0% |                    0.0%
+             90% |           0.0% |              0.0% |            0.0% |                    0.0%
+Landscape test photos (710 photos): 710 upright, 1420 sideways and 710 upside-down test cases
+  min confidence | sideways found | upside-down found | wrong direction | upright wrongly flagged
+             30% |           0.9% |              0.0% |            0.0% |                    0.0%
+             50% |           0.0% |              0.0% |            0.0% |                    0.0%
+             60% |           0.0% |              0.0% |            0.0% |                    0.0%
+             70% |           0.0% |              0.0% |            0.0% |                    0.0%
+             80% |           0.0% |              0.0% |            0.0% |                    0.0%
+             90% |           0.0% |              0.0% |            0.0% |                    0.0%
+
+### Prior: 99% upright, 0.45% each sideways, 0.1% upside down
+All test photos: 1777 upright, 3554 sideways and 1777 upside-down test cases
+  min confidence | sideways found | upside-down found | wrong direction | upright wrongly flagged
+             30% |           0.0% |              0.0% |            0.0% |                    0.0%
+             50% |           0.0% |              0.0% |            0.0% |                    0.0%
+             60% |           0.0% |              0.0% |            0.0% |                    0.0%
+             70% |           0.0% |              0.0% |            0.0% |                    0.0%
+             80% |           0.0% |              0.0% |            0.0% |                    0.0%
+             90% |           0.0% |              0.0% |            0.0% |                    0.0%
+Landscape test photos (710 photos): 710 upright, 1420 sideways and 710 upside-down test cases
+  min confidence | sideways found | upside-down found | wrong direction | upright wrongly flagged
+             30% |           0.0% |              0.0% |            0.0% |                    0.0%
+             50% |           0.0% |              0.0% |            0.0% |                    0.0%
+             60% |           0.0% |              0.0% |            0.0% |                    0.0%
+             70% |           0.0% |              0.0% |            0.0% |                    0.0%
+             80% |           0.0% |              0.0% |            0.0% |                    0.0%
+             90% |           0.0% |              0.0% |            0.0% |                    0.0%
+
+### Prior: 97% upright …, and all four passes must agree
+All test photos: 1777 upright, 3554 sideways and 1777 upside-down test cases
+  min confidence | sideways found | upside-down found | wrong direction | upright wrongly flagged
+             30% |           1.6% |              0.0% |            0.0% |                    0.0%
+             50% |           0.0% |              0.0% |            0.0% |                    0.0%
+             60% |           0.0% |              0.0% |            0.0% |                    0.0%
+             70% |           0.0% |              0.0% |            0.0% |                    0.0%
+             80% |           0.0% |              0.0% |            0.0% |                    0.0%
+             90% |           0.0% |              0.0% |            0.0% |                    0.0%
+Landscape test photos (710 photos): 710 upright, 1420 sideways and 710 upside-down test cases
+  min confidence | sideways found | upside-down found | wrong direction | upright wrongly flagged
+             30% |           0.9% |              0.0% |            0.0% |                    0.0%
+             50% |           0.0% |              0.0% |            0.0% |                    0.0%
+             60% |           0.0% |              0.0% |            0.0% |                    0.0%
+             70% |           0.0% |              0.0% |            0.0% |                    0.0%
+             80% |           0.0% |              0.0% |            0.0% |                    0.0%
+             90% |           0.0% |              0.0% |            0.0% |                    0.0%
