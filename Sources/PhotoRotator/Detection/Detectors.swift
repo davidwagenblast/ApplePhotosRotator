@@ -20,6 +20,12 @@ protocol OrientationDetector: Sendable {
     /// Scores keyed by correction. `pass` is the correction Vision applied before analysing, `image` is the photo
     /// as displayed (before that correction), and `frameSize` is the pixel size of the frame Vision analysed.
     func uprightScores(of requests: [VNRequest], image: CGImage, frameSize: CGSize, pass: Rotation) -> [Rotation: Double]
+    /// Adjusts the scores summed over all passes before they are combined with other detectors.
+    func finalScores(_ scores: [Rotation: Double]) -> [Rotation: Double]
+}
+
+extension OrientationDetector {
+    func finalScores(_ scores: [Rotation: Double]) -> [Rotation: Double] { scores }
 }
 
 /// Most detectors need a single Vision request per pass.
@@ -254,6 +260,15 @@ struct OrientationNetDetector: SingleRequestDetector {
     let weight = 1.0
     let runsOnce = false
     let network: OrientationNetwork
+
+    /// The network was trained with all four turns equally likely; real libraries are mostly upright and rarely
+    /// upside down. Measured on held-out photos (Models/OrientationNet-report-coreml.txt), these odds cut wrongly
+    /// flagged upright photos from 3% to under 0.1% at 50% confidence, while still finding about half of sideways
+    /// photos. In exchange the network alone almost never proposes upside-down turns; faces, people and text
+    /// still do.
+    static let prior = OrientationPrior(upright: 0.90, sideways: 0.045, upsideDown: 0.01)
+
+    func finalScores(_ scores: [Rotation: Double]) -> [Rotation: Double] { Self.prior.apply(to: scores) }
 
     /// The network bundled with the app (compiled at build time, or compiled once on first use), or `nil` if this
     /// build doesn't include one. `PHOTO_ROTATOR_ORIENTATION_NET` can point at a model for development.

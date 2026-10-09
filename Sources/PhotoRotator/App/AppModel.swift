@@ -39,7 +39,7 @@ final class AppModel {
     var selection: Set<String> = []
     /// Rotations the user changed by hand in review.
     var overrides: [String: Rotation] = [:]
-    var minimumConfidence = 0.6 { didSet { refilter() } }
+    var minimumConfidence = 0.5 { didSet { refilter() } }
     var rotationFilter: Rotation? { didSet { refilter() } }
     var isLoadingReview = false
 

@@ -59,6 +59,8 @@ them. Check the results in Photos before you do thousands.
 - **The percentage isn't the chance a proposal is right.** It's how strongly the cues agree. Most photos in a
   library are already upright, so even a small false-alarm rate can produce more wrong proposals than right ones.
   Raise **Minimum confidence** to see fewer, more reliable proposals.
+- **Each card says which cues made the call**, for example `faces 90°:0.88 · network 90°:0.71`. Proposals backed by
+  faces are the most reliable.
 - **Double-click a card** to see "What the scanner analysed". If that image is turned compared with **Now**, the
   scanner looked at the photo the wrong way round. Please report it.
 - **Copy Diagnostics** on the review screen copies a text report about the proposals shown: which cue made each
@@ -122,27 +124,24 @@ orientations. Every time, the app proposes the right fix, and applying that fix 
 
 **Scenes** were measured on 1,777 held-out Unsplash photos that the network never saw in training, each tested in
 all four orientations. The network ran as the app runs it (Core ML through Vision), with faces, body pose and text
-turned off so the numbers show the network alone:
+turned off so the numbers show the network alone.
 
-| Review minimum confidence | Rotated landscapes found | Turned the wrong way | Upright landscapes wrongly flagged |
-| --- | --- | --- | --- |
-| 50% | 86% | 0.9% | 1.4% |
-| 60% (default) | 85% | 0.8% | 1.1% |
-| 70% | 84% | 0.5% | 0.7% |
-| 80% | 82% | 0.3% | 0.4% |
+The network was trained with all four turns equally likely, but in a real library almost every photo is upright,
+sideways photos are occasional and upside-down ones rare. Used as trained, it flagged 3% of upright photos at 50%
+confidence, and in a real library those false alarms (mostly "upside down") outnumbered the real finds. So the app
+weighs it by realistic odds (90% upright, 4.5% each sideways direction, 1% upside down):
 
-Across all kinds of photo (not just landscapes), at the default 60% the network finds 70% of rotated photos, turns
-1.5% the wrong way, and wrongly flags 2.2% of upright ones; at 80% it's 63%, 0.5% and 0.8%. Close-ups, textures,
-food shot from above and other photos with no clear "up" are where it's unsure, and those stay **Not enough to
-judge**. Full tables: `Models/OrientationNet-report-coreml.txt`.
+| Review minimum confidence | Sideways photos found | Upside-down photos found | Wrong direction | Upright photos wrongly flagged |
+| --- | --- | --- | --- | --- |
+| 30% | 60% (landscapes 79%) | 0.3% | 0.6% | 0.2% |
+| 50% (default) | 51% (landscapes 70%) | 0% | 0.2% | 0% of 1,777 |
+| 60% | 28% (landscapes 39%) | 0% | 0.1% | 0% |
 
-For comparison, the lighter scene model it replaces found 75% of rotated landscapes at 60% (1.3% wrongly flagged)
-and 71% at 80% (0.6%), on the same test photos.
-
-What these numbers mean for a big library: if 150,000 of your photos have no faces, roughly 3,000 upright ones
-will be flagged at the default setting, and about 1,200 at 80%. They're never changed unless you tick them. Raise
-**Minimum confidence** on the review screen to see fewer false alarms (and find fewer rotated photos). The test
-photos come from Unsplash, so they're more polished than typical phone photos; your library may score differently.
+So at the default setting the network finds about half of sideways photos with no measured false alarms, but it
+won't propose upside-down turns on its own. Upside-down photos with faces, people or text are still found by
+those cues. Lowering **Minimum confidence** to 30% finds more sideways photos, with a few false alarms. Your
+photos may score differently from Unsplash test photos: report what you see with **Copy Diagnostics**. Full
+tables, including the other odds that were tried: `Models/OrientationNet-report-coreml.txt`.
 
 ### How the network was trained
 

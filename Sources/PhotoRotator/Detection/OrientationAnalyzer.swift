@@ -79,7 +79,7 @@ struct OrientationAnalyzer: Sendable {
             }
         }
         return detectors.enumerated().map { i, d in
-            DetectorEvidence(detector: d.name, weight: d.weight, uprightScores: scores[i])
+            DetectorEvidence(detector: d.name, weight: d.weight, uprightScores: d.finalScores(scores[i]))
         }
     }
 }

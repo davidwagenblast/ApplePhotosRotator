@@ -64,3 +64,22 @@ final class OrientationClassifierTests: XCTestCase {
         XCTAssertEqual(total[Rotation.none] ?? 0, 0, accuracy: 1e-9)
     }
 }
+
+final class OrientationPriorTests: XCTestCase {
+    func testEqualPriorChangesNothing() {
+        let scores: [Rotation: Double] = [.none: 0.1, .clockwise90: 0.6, .rotate180: 0.2, .clockwise270: 0.1]
+        let applied = OrientationPrior.equal.apply(to: scores)
+        for r in Rotation.allCases { XCTAssertEqual(applied[r]!, scores[r]!, accuracy: 1e-12) }
+    }
+
+    func testRealisticPriorNeedsMuchStrongerEvidenceForRareTurns() {
+        let prior = OrientationPrior(upright: 0.90, sideways: 0.045, upsideDown: 0.01)
+        // 60:20 for upside down is not enough against a 90% upright prior...
+        let weak = prior.apply(to: [.none: 0.2, .rotate180: 0.6, .clockwise90: 0.1, .clockwise270: 0.1])
+        XCTAssertGreaterThan(weak[Rotation.none]!, weak[.rotate180]!)
+        // ...but overwhelming evidence still wins, and the total is kept.
+        let strong = prior.apply(to: [.none: 0.005, .clockwise90: 0.99, .rotate180: 0.0025, .clockwise270: 0.0025])
+        XCTAssertGreaterThan(strong[.clockwise90]!, strong[Rotation.none]!)
+        XCTAssertEqual(strong.values.reduce(0, +), 1, accuracy: 1e-12)
+    }
+}
