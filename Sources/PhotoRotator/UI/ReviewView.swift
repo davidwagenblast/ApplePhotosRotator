@@ -85,6 +85,10 @@ private struct ReviewToolbar: View {
             }
             .frame(width: 250)
             Spacer()
+            Button(model.diagnosticsCopied ? "Diagnostics Copied" : "Copy Diagnostics") {
+                Task { await model.copyDiagnostics() }
+            }
+            .help("Copy a text report about the proposals shown (no photos or names) to paste into a bug report.")
             Button("Hide Selected") { Task { await model.dismissSelected() } }
                 .help("Mark the selected photos as correct so they stop appearing here.")
                 .disabled(model.selection.isEmpty)
@@ -213,18 +217,32 @@ private struct PreviewSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     var item: ReviewItem
+    @State private var analysed: NSImage?
 
     var body: some View {
         let rotation = model.rotation(for: item)
         VStack(spacing: 16) {
-            HStack(alignment: .top, spacing: 24) {
+            HStack(alignment: .top, spacing: 20) {
                 VStack {
-                    AssetThumbnail(asset: item.asset, rotation: .none, side: 380)
+                    AssetThumbnail(asset: item.asset, rotation: .none, side: 300)
                     Text("Now").foregroundStyle(.secondary)
                 }
                 VStack {
-                    AssetThumbnail(asset: item.asset, rotation: rotation, side: 380)
+                    AssetThumbnail(asset: item.asset, rotation: rotation, side: 300)
                     Text("Proposed: \(rotation.label)").foregroundStyle(.secondary)
+                }
+                VStack {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.1))
+                        if let analysed {
+                            Image(nsImage: analysed).resizable().scaledToFit()
+                        } else {
+                            ProgressView().controlSize(.small)
+                        }
+                    }
+                    .frame(width: 300, height: 300)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    Text("What the scanner analysed").foregroundStyle(.secondary)
                 }
             }
             if let date = item.asset.creationDate {
@@ -242,6 +260,13 @@ private struct PreviewSheet: View {
             }
         }
         .padding(24)
+        .task {
+            let asset = item.asset, size = model.settings.analysisSize
+            let image = await Task.detached(priority: .userInitiated) {
+                PhotoLibrary.analysisImage(for: asset, longEdge: size, allowNetwork: true)
+            }.value
+            analysed = image.map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) }
+        }
     }
 }
 

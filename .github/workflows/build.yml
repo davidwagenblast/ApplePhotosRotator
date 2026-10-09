@@ -29,6 +29,8 @@ jobs:
           plutil -lint "$APP/Contents/Info.plist"
           codesign --verify --verbose "$APP"
           ls "$APP/Contents/Resources" | grep -q '^OrientationNet\.mlmodelc$'
+          test -s "$APP/Contents/Resources/AppIcon.icns"
+          sips -g pixelWidth "$APP/Contents/Resources/AppIcon.icns"
       - name: One-step install piped from curl (no copy of the code)
         # Same as `curl … | bash`, but downloading this commit instead of main.
         env:

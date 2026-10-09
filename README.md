@@ -54,6 +54,18 @@ a real app bundle that declares why it needs access.
 **Try a small batch first.** Apply 10–20 photos, including a Live Photo and an iCloud-only photo if you have
 them. Check the results in Photos before you do thousands.
 
+## If the proposals look wrong
+
+- **The percentage isn't the chance a proposal is right.** It's how strongly the cues agree. Most photos in a
+  library are already upright, so even a small false-alarm rate can produce more wrong proposals than right ones.
+  Raise **Minimum confidence** to see fewer, more reliable proposals.
+- **Double-click a card** to see "What the scanner analysed". If that image is turned compared with **Now**, the
+  scanner looked at the photo the wrong way round. Please report it.
+- **Copy Diagnostics** on the review screen copies a text report about the proposals shown: which cue made each
+  call and the image sizes involved. It contains no photos or names.
+- **Undo All Rotations…** on the scan screen returns every photo the app has rotated to its original, using Photos'
+  Revert to Original. That also removes any other edits on those photos.
+
 ## How rotations are applied (and why it's safe for your library)
 
 The app never opens or writes the Photos library package on disk. Every change goes through Apple's PhotoKit

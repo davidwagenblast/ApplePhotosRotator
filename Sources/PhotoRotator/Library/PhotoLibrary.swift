@@ -57,6 +57,34 @@ enum PhotoLibrary {
         return nil
     }
 
+    /// One line describing how Photos hands over this photo, for diagnosing orientation problems. **Blocking.**
+    /// "shortcut" is what the app used before version 2; if its shape differs from "displayed", that photo was
+    /// analysed turned.
+    static func orientationDiagnostics(for asset: PHAsset, longEdge: Int) -> String {
+        let options = PHImageRequestOptions()
+        options.isSynchronous = true
+        options.deliveryMode = .highQualityFormat
+        options.resizeMode = .fast
+        options.version = .current
+        options.isNetworkAccessAllowed = false
+        var line = "asset \(asset.pixelWidth)×\(asset.pixelHeight)"
+        PHImageManager.default().requestImage(
+            for: asset, targetSize: CGSize(width: longEdge, height: longEdge), contentMode: .aspectFit, options: options
+        ) { image, _ in
+            guard let image else { line += " · no local image"; return }
+            line += " · displayed \(Int(image.size.width))×\(Int(image.size.height))"
+            if let shortcut = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+                line += " · shortcut \(shortcut.width)×\(shortcut.height)"
+            }
+            if let drawn = displayedPixels(of: image, maxLongEdge: longEdge) {
+                line += " · analysed \(drawn.width)×\(drawn.height)"
+            }
+            let reps = image.representations.map { "\(type(of: $0)) \($0.pixelsWide)×\($0.pixelsHigh)" }
+            line += " · reps [\(reps.joined(separator: ", "))]"
+        }
+        return line
+    }
+
     /// The image as it appears on screen, as an upright bitmap.
     ///
     /// Don't use `NSImage.cgImage(forProposedRect:context:hints:)` for this: it can hand back the stored pixels

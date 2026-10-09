@@ -81,6 +81,8 @@ if pgrep -x PhotoRotator >/dev/null 2>&1; then
 fi
 rm -rf "${destination:?}/$APP_NAME"
 ditto "$source_dir/build/$APP_NAME" "$destination/$APP_NAME"
+# Let Finder and the Dock pick up a changed icon.
+touch "$destination/$APP_NAME"
 step "Installed $destination/$APP_NAME"
 
 # 5. Open.

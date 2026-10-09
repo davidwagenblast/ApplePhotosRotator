@@ -20,6 +20,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/PhotoRotator" "$APP/Contents/MacOS/PhotoRotator"
 cp Support/Info.plist "$APP/Contents/Info.plist"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
+cp Support/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 # The orientation network. Compiled now if Xcode's Core ML compiler is available; otherwise the package is bundled
 # as is and the app compiles it once on first use.

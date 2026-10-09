@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 import Photos
@@ -51,6 +52,8 @@ final class AppModel {
 
     /// Whether the built-in orientation network loaded; `nil` until checked.
     var networkReady: Bool?
+
+    var diagnosticsCopied = false
 
     // MARK: Undo state
     var isUndoing = false
@@ -282,6 +285,28 @@ final class AppModel {
             errorMessage = error.localizedDescription
         }
         await refreshCounts()
+    }
+
+    /// Copies a plain-text report about the top proposals on screen (no photos, no names) for troubleshooting.
+    func copyDiagnostics() async {
+        let items = Array(visibleItems.prefix(30))
+        let size = settings.analysisSize
+        let header = [
+            "Photo Rotator diagnostics",
+            "analysis version \(ResultStore.analysisVersion); orientation network \(networkReady == true ? "ready" : "NOT loaded")",
+            "settings: faces \(settings.useFaces), body \(settings.useBodyPose), scenes \(settings.useScene), text \(settings.useText), size \(size)",
+            "results: \(counts.upright) upright, \(counts.needsRotation) need rotating, \(counts.inconclusive) unsure, \(counts.applied) rotated by the app",
+            "showing \(visibleItems.count) proposals at ≥\(Int(minimumConfidence * 100))%; first \(items.count):",
+        ]
+        let lines = await Task.detached(priority: .userInitiated) {
+            items.enumerated().map { index, item in
+                "\(index + 1). \(item.proposed.shortLabel) \(Int((item.confidence * 100).rounded()))% [\(item.evidence)] · "
+                    + PhotoLibrary.orientationDiagnostics(for: item.asset, longEdge: size)
+            }
+        }.value
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString((header + lines).joined(separator: "\n"), forType: .string)
+        diagnosticsCopied = true
     }
 
     func cancelApply() {
