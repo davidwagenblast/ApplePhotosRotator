@@ -206,6 +206,12 @@ struct AssetThumbnail: View {
     }
     @Environment(\.displayScale) private var displayScale
 
+    init(asset: PHAsset, rotation: Rotation, side: CGFloat) {
+        self.asset = asset
+        self.rotation = rotation
+        self.side = side
+    }
+
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.1))
