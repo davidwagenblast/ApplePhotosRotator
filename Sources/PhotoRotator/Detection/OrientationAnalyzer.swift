@@ -6,12 +6,13 @@ import Vision
 
 /// Runs the detectors over one image and decides whether it needs rotating.
 ///
-/// Detectors run in stages, cheapest and most reliable first. If a stage already produces a confident answer the
-/// remaining stages are skipped, which matters when the same work is repeated 250,000 times.
+/// Detectors run in stages, cheapest first. A photo that is confidently upright stops early, which matters when the
+/// same work is repeated 250,000 times. A proposed turn never stops early: every cue gets a say, so a person lying
+/// down in an upright photo, or a sign the scene network misreads, can outvote it.
 struct OrientationAnalyzer: Sendable {
     var stages: [[any OrientationDetector]]
     var decider: OrientationDecider
-    /// Stop after a stage once the decision is at least this confident.
+    /// Stop after a stage once the photo is judged upright with at least this confidence.
     var earlyExitConfidence: Double = 0.8
 
     struct Result: Sendable {
@@ -56,7 +57,7 @@ struct OrientationAnalyzer: Sendable {
         for stage in stages {
             evidence += try run(stage, on: image)
             decision = decider.decide(evidence)
-            if decision.confidence >= earlyExitConfidence { break }
+            if decision.status == .upright && decision.confidence >= earlyExitConfidence { break }
         }
         return Result(decision: decision, evidence: evidence)
     }

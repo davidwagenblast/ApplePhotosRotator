@@ -47,6 +47,23 @@ final class OrientationPipelineTests: XCTestCase {
         }
     }
 
+    /// Brand names and other non-words can't say which way up a photo is, but readable text still rules out
+    /// sideways. Here it outvotes a confident (wrong) sideways guess from another cue, such as the scene network.
+    func testLogoTextVetoesAWrongSidewaysGuess() throws {
+        let logo = Self.textImage(lines: ["ZORBLAX QWENTO", "FLIMBRO 4721", "KAVOTZ SNERP"])
+        for quarterTurns in [0, 2] {
+            let image = Self.turnedCounterClockwise(logo, quarterTurns: quarterTurns)
+            let text = try analyzer.analyze(image).evidence
+            XCTAssertFalse(text.isEmpty)
+            for sideways in [Rotation.clockwise90, .clockwise270] {
+                let wrongGuess = DetectorEvidence(detector: "network", weight: 1, uprightScores: [sideways: 0.7, Rotation.none: 0.25])
+                let decision = OrientationDecider().decide(text + [wrongGuess])
+                XCTAssertFalse(decision.status == .needsRotation && decision.rotation == sideways,
+                               "turned \(quarterTurns * 90)°: \(decision) from \(text)")
+            }
+        }
+    }
+
     func testBlankImageIsInconclusive() throws {
         let blank = Self.canvas(width: 600, height: 400) { _ in }
         XCTAssertEqual(try analyzer.analyze(blank).decision.status, .inconclusive)
@@ -93,14 +110,13 @@ final class OrientationPipelineTests: XCTestCase {
     }
 
     /// A 900×600 page of large black text, upright.
-    static func textImage() -> CGImage {
+    static func textImage(lines: [String] = ["THE QUICK BROWN FOX", "JUMPS OVER THE LAZY", "DOG NEAR THE RIVER", "PHOTO ROTATOR TEST"]) -> CGImage {
         canvas(width: 900, height: 600) { context in
             let font = CTFontCreateWithName("Helvetica-Bold" as CFString, 54, nil)
             let attributes: [NSAttributedString.Key: Any] = [
                 NSAttributedString.Key(kCTFontAttributeName as String): font,
                 NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(red: 0, green: 0, blue: 0, alpha: 1),
             ]
-            let lines = ["THE QUICK BROWN FOX", "JUMPS OVER THE LAZY", "DOG NEAR THE RIVER", "PHOTO ROTATOR TEST"]
             for (i, text) in lines.enumerated() {
                 let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: attributes))
                 context.textPosition = CGPoint(x: 40, y: 480 - i * 130)

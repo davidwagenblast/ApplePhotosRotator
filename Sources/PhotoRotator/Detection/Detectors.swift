@@ -143,11 +143,16 @@ struct BodyPoseDetector: PerPassDetector {
     }
 }
 
-/// Signs, documents, screens. Vision reads sideways text not at all, and upside-down text as gibberish with the
-/// *same* confidence as real text, so the score counts recognised dictionary words, not Vision's confidence.
-struct TextDetector: PerPassDetector {
+/// Signs, logos, documents, screens. Two signals per pass:
+/// - *Which way up*: Vision reads upside-down text as gibberish with the *same* confidence as real text, so this
+///   counts recognised dictionary words, not Vision's confidence.
+/// - *Which axis*: Vision can't read sideways text at all, so any text it reads in a pass — brand names, numbers,
+///   gibberish — means the photo is either that way up or upside down, never sideways. This works for logos and
+///   screens whose words aren't in the dictionary.
+struct TextDetector: SingleRequestDetector {
     let name = "text"
-    let weight = 0.7
+    let weight = 0.9
+    let runsOnce = false
 
     func makeRequest() -> VNRequest {
         let request = VNRecognizeTextRequest()
@@ -157,13 +162,18 @@ struct TextDetector: PerPassDetector {
         return request
     }
 
-    func uprightScore(of request: VNRequest, frameSize: CGSize) -> Double {
-        guard let lines = request.results as? [VNRecognizedTextObservation], !lines.isEmpty else { return 0 }
-        let text = lines.compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ")
+    func uprightScores(of request: VNRequest, image: CGImage, frameSize: CGSize, pass: Rotation) -> [Rotation: Double] {
+        guard let lines = request.results as? [VNRecognizedTextObservation], !lines.isEmpty else { return [:] }
+        let strings = lines.compactMap { $0.topCandidates(1).first?.string }
+        let text = strings.joined(separator: " ")
         let (words, real) = Lexicon.count(in: text)
-        guard words > 0 else { return 0 }
-        // Mostly real words, and enough of them: ~3 real words is strong evidence.
-        return (Double(real) / Double(words)) * (1 - exp(-Double(real) / 2))
+        // Mostly real words, and enough of them: ~3 real words is strong evidence for this exact way up.
+        let direction = words > 0 ? (Double(real) / Double(words)) * (1 - exp(-Double(real) / 2)) : 0
+        // Any readable characters that aren't clearly words: evidence for this way up or upside down, split evenly.
+        // (Where real words already say which way up, this would only blur that answer.)
+        let characters = text.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }.count
+        let axis = 0.25 * (1 - exp(-Double(characters) / 12)) * (1 - direction)
+        return [pass: direction + axis, pass.followed(by: .rotate180): axis]
     }
 }
 

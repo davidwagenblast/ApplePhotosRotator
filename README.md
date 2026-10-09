@@ -61,10 +61,8 @@ them. Check the results in Photos before you do thousands.
   Raise **Minimum confidence** to see fewer, more reliable proposals.
 - **Each card says which cues made the call**, for example `faces 90°:0.88 · network 90°:0.71`. Proposals backed by
   faces are the most reliable.
-- **Double-click a card** to see "What the scanner analysed". If that image is turned compared with **Now**, the
-  scanner looked at the photo the wrong way round. Please report it.
-- **Copy Diagnostics** on the review screen copies a text report about the proposals shown: which cue made each
-  call and the image sizes involved. It contains no photos or names.
+- **Copy Diagnostics** on the review screen copies a text report about the proposals shown: which cues made each
+  call, how strongly, and the photo's size. It contains no photos or names.
 - **Undo All Rotations…** on the scan screen returns every photo the app has rotated to its original, using Photos'
   Revert to Original. That also removes any other edits on those photos.
 

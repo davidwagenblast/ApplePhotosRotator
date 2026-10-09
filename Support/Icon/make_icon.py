@@ -102,10 +102,6 @@ def main():
     base1 = (tip_center[0] + normal[0] * half, tip_center[1] + normal[1] * half)
     base2 = (tip_center[0] - normal[0] * half, tip_center[1] - normal[1] * half)
     ad.polygon([tip, base1, base2], fill=coral)
-    # Round cap at the start.
-    a0 = math.radians(start)
-    sx, sy = S * 0.5 + rr * math.cos(a0), S * 0.5 + rr * math.sin(a0)
-    ad.ellipse((sx - 44, sy - 44, sx + 44, sy + 44), fill=coral)
     arrow_shadow = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     arrow_shadow.paste((120, 30, 60, 90), (0, 0), arrow.split()[3])
     icon.alpha_composite(arrow_shadow.filter(ImageFilter.GaussianBlur(14)), (0, 14))

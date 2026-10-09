@@ -88,7 +88,8 @@ actor ResultStore {
     /// Bump whenever a change to analysis makes earlier results untrustworthy.
     /// 2: photos are analysed as displayed (version 1 could analyse photos stored with an orientation tag sideways).
     /// 3: the orientation network is weighed by how common each turn really is.
-    static let analysisVersion: Int32 = 3
+    /// 4: proposed turns always hear from every cue; text rules out sideways turns even when it isn't a word.
+    static let analysisVersion: Int32 = 4
 
     deinit { sqlite3_close(db) }
 

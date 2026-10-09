@@ -298,12 +298,10 @@ final class AppModel {
             "results: \(counts.upright) upright, \(counts.needsRotation) need rotating, \(counts.inconclusive) unsure, \(counts.applied) rotated by the app",
             "showing \(visibleItems.count) proposals at ≥\(Int(minimumConfidence * 100))%; first \(items.count):",
         ]
-        let lines = await Task.detached(priority: .userInitiated) {
-            items.enumerated().map { index, item in
-                "\(index + 1). \(item.proposed.shortLabel) \(Int((item.confidence * 100).rounded()))% [\(item.evidence)] · "
-                    + PhotoLibrary.orientationDiagnostics(for: item.asset, longEdge: size)
-            }
-        }.value
+        let lines = items.enumerated().map { index, item in
+            "\(index + 1). \(item.proposed.shortLabel) \(Int((item.confidence * 100).rounded()))% [\(item.evidence)] · "
+                + "\(item.asset.pixelWidth)×\(item.asset.pixelHeight)"
+        }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString((header + lines).joined(separator: "\n"), forType: .string)
         diagnosticsCopied = true
