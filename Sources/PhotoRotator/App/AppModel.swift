@@ -116,8 +116,8 @@ final class AppModel {
                     analyzer: OrientationAnalyzer(settings: settings, model: model),
                     store: store
                 )
-                try await engine.run { [weak self] progress in
-                    self?.progress = progress
+                try await engine.run { progress in
+                    self.progress = progress
                 }
             } catch {
                 errorMessage = "Scan stopped: \(error.localizedDescription)"
@@ -223,8 +223,8 @@ final class AppModel {
         applyFailures = []
         applyProgress = (0, items.count)
         applyTask = Task {
-            let failures = await RotationApplier(store: store).apply(items) { [weak self] done, total in
-                self?.applyProgress = (done, total)
+            let failures = await RotationApplier(store: store).apply(items) { done, total in
+                self.applyProgress = (done, total)
             }
             let failed = Set(failures.map(\.localIdentifier))
             let attempted = Set(items.prefix(applyProgress?.done ?? items.count).map(\.localIdentifier))

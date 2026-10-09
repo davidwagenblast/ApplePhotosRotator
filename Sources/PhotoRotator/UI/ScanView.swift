@@ -3,9 +3,23 @@ import UniformTypeIdentifiers
 
 struct ScanView: View {
     @Environment(AppModel.self) private var model
-    @State private var confirmReset = false
-    @State private var choosingModel = false
-    @State private var confirmUndo = false
+    // `State` is used directly instead of `@State`: with recent SDKs `@State` is a macro, and Apple's Command Line
+    // Tools (without Xcode) can't expand it. This is exactly what `@State` stands for.
+    private var _confirmReset = State<Bool>(wrappedValue: false)
+    private var confirmReset: Bool {
+        get { _confirmReset.wrappedValue }
+        nonmutating set { _confirmReset.wrappedValue = newValue }
+    }
+    private var _choosingModel = State<Bool>(wrappedValue: false)
+    private var choosingModel: Bool {
+        get { _choosingModel.wrappedValue }
+        nonmutating set { _choosingModel.wrappedValue = newValue }
+    }
+    private var _confirmUndo = State<Bool>(wrappedValue: false)
+    private var confirmUndo: Bool {
+        get { _confirmUndo.wrappedValue }
+        nonmutating set { _confirmUndo.wrappedValue = newValue }
+    }
 
     var body: some View {
         @Bindable var model = model
@@ -103,19 +117,19 @@ struct ScanView: View {
             }
         }
         .formStyle(.grouped)
-        .confirmationDialog("Undo all rotations made by Photo Rotator?", isPresented: $confirmUndo) {
+        .confirmationDialog("Undo all rotations made by Photo Rotator?", isPresented: _confirmUndo.projectedValue) {
             Button("Revert \(model.counts.applied.formatted()) Photos to Original", role: .destructive) {
                 Task { await model.undoAllRotations() }
             }
         } message: {
             Text("Each photo this app rotated goes back to its original, as with Image › Revert to Original in Photos. That also removes any other edits on those photos, such as crops or filters, whether made before or after the rotation.")
         }
-        .confirmationDialog("Forget all scan results?", isPresented: $confirmReset) {
+        .confirmationDialog("Forget all scan results?", isPresented: _confirmReset.projectedValue) {
             Button("Forget Results", role: .destructive) { Task { await model.resetResults() } }
         } message: {
             Text("The next scan will check every photo again. Rotations already applied stay in Photos.")
         }
-        .fileImporter(isPresented: $choosingModel, allowedContentTypes: [.item, .folder]) { result in
+        .fileImporter(isPresented: _choosingModel.projectedValue, allowedContentTypes: [.item, .folder]) { result in
             if case .success(let url) = result { model.settings.modelPath = url.path }
         }
     }

@@ -40,3 +40,19 @@ jobs:
         run: |
           bash -s -- --no-open < install.sh
           codesign --verify --verbose "$RUNNER_TEMP/Applications-piped/Photo Rotator.app"
+
+  command-line-tools:
+    # Builds the way most people install: Apple's Command Line Tools only (no Xcode), on the newest macOS image.
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchains on this runner
+        run: |
+          ls /Applications | grep -i xcode || true
+          ls /Library/Developer/CommandLineTools/SDKs || true
+          DEVELOPER_DIR=/Library/Developer/CommandLineTools xcrun swift --version
+      - name: Build with the Command Line Tools only
+        env:
+          DEVELOPER_DIR: /Library/Developer/CommandLineTools
+        run: swift build -c release --product PhotoRotator

@@ -31,6 +31,12 @@ fail() { printf '\nError: %s\n' "$1" >&2; exit 1; }
 macos_version="$(sw_vers -productVersion)"
 [ "${macos_version%%.*}" -ge 14 ] || fail "Photo Rotator needs macOS 14 Sonoma or later. This Mac has macOS $macos_version."
 
+# Prefer a full Xcode when one is installed and ready: it has everything the newest SDKs need.
+if [ -z "${DEVELOPER_DIR:-}" ] && [ -d /Applications/Xcode.app/Contents/Developer ] \
+    && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swift --version >/dev/null 2>&1; then
+    export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+fi
+
 # Swift and git come with Apple's free Command Line Tools (or Xcode).
 if ! xcrun --find swift >/dev/null 2>&1 || ! xcrun --find git >/dev/null 2>&1; then
     step "Installing Apple's Command Line Tools (needed once to build the app)"

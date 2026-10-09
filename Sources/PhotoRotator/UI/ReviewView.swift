@@ -4,14 +4,24 @@ import SwiftUI
 
 struct ReviewView: View {
     @Environment(AppModel.self) private var model
-    @State private var confirmApply = false
-    @State private var previewItem: ReviewItem?
+    // `State` is used directly instead of `@State`: with recent SDKs `@State` is a macro, and Apple's Command Line
+    // Tools (without Xcode) can't expand it. This is exactly what `@State` stands for.
+    private var _confirmApply = State<Bool>(wrappedValue: false)
+    private var confirmApply: Bool {
+        get { _confirmApply.wrappedValue }
+        nonmutating set { _confirmApply.wrappedValue = newValue }
+    }
+    private var _previewItem = State<ReviewItem?>(wrappedValue: nil)
+    private var previewItem: ReviewItem? {
+        get { _previewItem.wrappedValue }
+        nonmutating set { _previewItem.wrappedValue = newValue }
+    }
 
     private let columns = [GridItem(.adaptive(minimum: 250, maximum: 320), spacing: 14)]
 
     var body: some View {
         VStack(spacing: 0) {
-            ReviewToolbar(confirmApply: $confirmApply)
+            ReviewToolbar(confirmApply: _confirmApply.projectedValue)
             Divider()
             if model.isLoadingReview && model.reviewItems.isEmpty {
                 ProgressView("Loading proposals…").frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -34,7 +44,7 @@ struct ReviewView: View {
                 }
             }
         }
-        .sheet(item: $previewItem) { item in
+        .sheet(item: _previewItem.projectedValue) { item in
             PreviewSheet(item: item)
         }
         .sheet(isPresented: Binding(get: { model.applyProgress != nil }, set: { _ in })) {
@@ -42,7 +52,7 @@ struct ReviewView: View {
         }
         .confirmationDialog(
             "Rotate \(model.selectedVisibleItems.count.formatted()) photos?",
-            isPresented: $confirmApply
+            isPresented: _confirmApply.projectedValue
         ) {
             Button("Rotate \(model.selectedVisibleItems.count.formatted()) Photos") { model.applySelected() }
         } message: {
@@ -189,7 +199,11 @@ struct AssetThumbnail: View {
     var asset: PHAsset
     var rotation: Rotation
     var side: CGFloat
-    @State private var image: NSImage?
+    private var _image = State<NSImage?>(wrappedValue: nil)
+    private var image: NSImage? {
+        get { _image.wrappedValue }
+        nonmutating set { _image.wrappedValue = newValue }
+    }
     @Environment(\.displayScale) private var displayScale
 
     var body: some View {
