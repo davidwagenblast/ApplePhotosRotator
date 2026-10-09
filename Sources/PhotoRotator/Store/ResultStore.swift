@@ -183,9 +183,14 @@ actor ResultStore {
 
     // MARK: Reading
 
-    /// `local_id → mod_date` for every scanned photo, used to skip unchanged photos when resuming.
+    /// `local_id → mod_date` for every photo that needn't be scanned again unless it changes. Photos that weren't
+    /// available locally or failed are left out, so the next scan tries them again (for example after turning on
+    /// iCloud downloads).
     func scannedModificationDates() throws -> [String: Double] {
-        let statement = try prepare("SELECT local_id, mod_date FROM results")
+        let statement = try prepare("""
+            SELECT local_id, mod_date FROM results
+            WHERE status NOT IN (\(ScanStatus.unavailable.rawValue), \(ScanStatus.failed.rawValue)) OR applied_at IS NOT NULL
+            """)
         defer { sqlite3_finalize(statement) }
         var result: [String: Double] = [:]
         while sqlite3_step(statement) == SQLITE_ROW {

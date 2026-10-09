@@ -113,7 +113,7 @@ struct ScanView: View {
             } header: {
                 Text("Which photos")
             } footer: {
-                Text("Settings apply to the next scan.")
+                Text("Settings apply to the next scan. Photos that weren't available locally are tried again on every scan.")
             }
         }
         .formStyle(.grouped)
