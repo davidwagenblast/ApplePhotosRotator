@@ -61,14 +61,23 @@ DispatchQueue.concurrentPerform(iterations: names.count) { index in
     lock.unlock()
 }
 
-var everything = OrientationEvaluation(weight: 1.0)
-var landscapes = OrientationEvaluation(weight: 1.0)
+// The same predictions scored under different assumptions about how common each turn is.
+let variants: [(name: String, prior: OrientationPrior, agreement: Bool)] = [
+    ("As trained: all four turns equally likely", .equal, false),
+    ("As trained, and all four passes must agree", .equal, true),
+    ("Prior: 90% upright, 4.5% each sideways, 1% upside down", OrientationPrior(upright: 0.90, sideways: 0.045, upsideDown: 0.01), false),
+    ("Prior: 97% upright, 1.35% each sideways, 0.3% upside down", OrientationPrior(upright: 0.97, sideways: 0.0135, upsideDown: 0.003), false),
+    ("Prior: 99% upright, 0.45% each sideways, 0.1% upside down", OrientationPrior(upright: 0.99, sideways: 0.0045, upsideDown: 0.001), false),
+    ("Prior: 97% upright …, and all four passes must agree", OrientationPrior(upright: 0.97, sideways: 0.0135, upsideDown: 0.003), true),
+]
+var evaluations = variants.map { OrientationEvaluation(weight: 1.0, prior: $0.prior, requireAgreement: $0.agreement) }
+var landscapeEvaluations = evaluations
 var correctSingle = 0, totalSingle = 0, landscapeCount = 0
 for name in names {
     guard let p = results[name] else { continue }
-    everything.add(p)
+    for i in evaluations.indices { evaluations[i].add(p) }
     if landscapeNames.contains(name) {
-        landscapes.add(p)
+        for i in landscapeEvaluations.indices { landscapeEvaluations[i].add(p) }
         landscapeCount += 1
     }
     for (needed, probabilities) in p.enumerated() {
@@ -77,14 +86,17 @@ for name in names {
     }
 }
 
-let report = """
-Core ML model, run through Vision as in the app, on \(results.count) held-out photos.
-Single-pass accuracy: \(String(format: "%.1f%%", 100 * Double(correctSingle) / Double(max(totalSingle, 1)))).
-
-\(everything.report(title: "All test photos"))
-
-\(landscapes.report(title: "Landscape test photos (\(landscapeCount) photos)"))
-"""
+var sections = [
+    "Core ML model, run through Vision as in the app, on \(results.count) held-out photos.",
+    "Single-pass accuracy: \(String(format: "%.1f%%", 100 * Double(correctSingle) / Double(max(totalSingle, 1)))).",
+]
+for (i, variant) in variants.enumerated() {
+    sections.append("")
+    sections.append("### \(variant.name)")
+    sections.append(evaluations[i].report(title: "All test photos"))
+    sections.append(landscapeEvaluations[i].report(title: "Landscape test photos (\(landscapeCount) photos)"))
+}
+let report = sections.joined(separator: "\n")
 print("\n" + report)
 if let output = options["output"] {
     try report.write(toFile: output, atomically: true, encoding: .utf8)
